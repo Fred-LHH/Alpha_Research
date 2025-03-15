@@ -1,0 +1,2 @@
+2025-03-14 16:16:37,159 - engine.py - 31 - INFO - MainThread - create the table trade_dates if not exist 
+2025-03-14 16:16:37,570 - engine.py - 105 - INFO - MainThread - updating trade_dates from 20090102 to 20250314

@@ -1,7 +1,7 @@
 from datetime import *
 import tushare as ts
 import time
-import logger
+import Data.logger as logger
 from config import *
 import pandas as pd
 import numpy as np
@@ -52,12 +52,7 @@ class TSDataFetcher():
         self.counts += 1
         if df is None:
             return None
-        if len(df) == 6000:  # 最多下载6000条记录
-            last_download_date = df['trade_date'].iloc[-1]
-            last_download_date = (datetime.datetime.strptime(last_download_date, '%Y%m%d') - datetime.timedelta(days=1)).strftime("%Y%m%d")
-            df2 = self.pro_bar(ts_code, api, last_download_date, end_date, freq, asset, exchange, adj, ma, factors, adjfactor, offset,limit, contract_type,retry_count)
-            if len(df2) > 0:
-                df = pd.concat([df, df2], axis=0)
+        
         if self.counts >= (self.qpm - self.ft):
             # 安全起见，降低ft qpm
             current_time = time.time()

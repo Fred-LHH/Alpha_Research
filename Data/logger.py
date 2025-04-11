@@ -49,5 +49,5 @@ def get_logger(name):
     return _logger
 
 
-dateslogger = get_logger('trade_dates')
-stockslogger = get_logger('stocks')
+
+bfqlogger = get_logger('bfq')

@@ -1,3 +1,0 @@
-2025-03-14 17:47:21,447 - engine.py - 159 - INFO - MainThread - create the table stocks if not exist 
-2025-03-14 17:47:21,449 - engine.py - 162 - INFO - MainThread - 开始更新股票状态, 日期: 20250314
-2025-03-14 17:47:22,005 - engine.py - 183 - INFO - MainThread - 股票状态更新完成, 日期: 20250314

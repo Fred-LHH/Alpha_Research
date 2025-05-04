@@ -37,6 +37,7 @@ DB_NAME = {
 }
 
 LOCAL_DATA_PATH = '/Users/lihaohan/Desktop/国泰安'
+BARRA_FACTOR_PATH = '/Volumes/T7Shield/资源/Alpha_research/Factor/Barra因子'
 
 
 STATES = {
@@ -45,3 +46,54 @@ STATES = {
     'save': False,
     'plot': False
 }
+
+hfq_columns = ['date', 'code', 'name', 'filling', 'open', 'close', 'high', 'low', 'vol', 'amount', 'distance', 'status', 'avg_price', 'pct_chg', 'total_share', 'circ_share', 'turnover', 'total_mv', 'circ_mv']
+
+bfq_columns = ['code', 'date', 'open', 'high', 'low', 'close', 'vol', 'amount', 'circ_mv', 'total_mv', 
+           'market_type', 'status', 'pre_close', 'pct_chg', 'limit_down', 'limit_up', 'limit_status']
+
+
+bfq_table_cols = {
+    'code': 'VARCHAR(40)',
+    'date': 'VARCHAR(40)',
+    'open': 'DECIMAL(20, 3)',
+    'high': 'DECIMAL(20, 3)',
+    'low': 'DECIMAL(20, 3)',
+    'close': 'DECIMAL(20, 3)',
+    'vol': 'DECIMAL(20, 3)',
+    'amount': 'DECIMAL(20, 3)',
+    'circ_mv': 'DECIMAL(20, 3)',
+    'total_mv': 'DECIMAL(20, 3)',
+    'market_type': 'DECIMAL(20, 3)',
+    'status': 'DECIMAL(20, 3)',
+    'pre_close': 'DECIMAL(20, 3)',
+    'pct_chg': 'DECIMAL(20, 3)',
+    'limit_down': 'DECIMAL(20, 3)',
+    'limit_up': 'DECIMAL(20, 3)',
+    'limit_status': 'DECIMAL(20, 3)',
+}
+
+hfq_table_cols = {
+    'code': 'VARCHAR(40)',
+    'date': 'VARCHAR(40)',
+    'name': 'VARCHAR(40)',
+    'filling': 'VARCHAR(40)',
+    'open': 'DECIMAL(20, 3)',
+    'high': 'DECIMAL(20, 3)',
+    'low': 'DECIMAL(20, 3)',
+    'close': 'DECIMAL(20, 3)',
+    'vol': 'DECIMAL(20, 3)',
+    'amount': 'DECIMAL(20, 3)',
+    'distance': 'DECIMAL(20, 3)',
+    'circ_mv': 'DECIMAL(20, 3)',
+    'total_mv': 'DECIMAL(20, 3)',
+    'status': 'DECIMAL(20, 3)',
+    'avg_price': 'DECIMAL(20, 3)',
+    'pct_chg': 'DECIMAL(20, 3)',
+    'total_share': 'DECIMAL(20, 3)',
+    'circ_share': 'DECIMAL(20, 3)',
+    'turnover': 'DECIMAL(20, 3)',
+}
+
+
+

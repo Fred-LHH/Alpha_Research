@@ -129,7 +129,8 @@ class TSDataFetcher():
         dates = self.pro.trade_cal(start_date=start_date, end_date=end_date)
         trade_date = dates[dates['is_open'] == 1]
         trade_date = pd.DataFrame(trade_date[['cal_date']])
-        return trade_date
+        trade_date.columns = ['date']
+        return trade_date.reset_index(drop=True)
     
     def up_down_price(self, trade_date=''):
         '''

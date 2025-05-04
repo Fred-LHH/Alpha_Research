@@ -51,3 +51,4 @@ def get_logger(name):
 
 
 bfqlogger = get_logger('bfq')
+hfqlogger = get_logger('hfq')

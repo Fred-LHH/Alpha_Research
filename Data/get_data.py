@@ -168,3 +168,31 @@ def read_market(
     if freq != 'D':
         df = df.resample(freq).last()
     return df.dropna(how='all')
+
+
+def read_Barra_factor(
+        dividend: bool = 0,
+        growth: bool = 0,
+        liquidity: bool = 0,
+        momentum: bool = 0,
+        quality: bool = 0,
+        size: bool = 0,
+        value: bool = 0,
+        volatility: bool = 0,
+):
+    if dividend:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Dividend.pkl'))
+    elif growth:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Growth.pkl'))
+    elif liquidity:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Liquidity.pkl'))
+    elif momentum:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Momentum.pkl'))
+    elif quality:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Quality.pkl'))
+    elif size:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Size.pkl'))
+    elif value:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Value.pkl'))
+    elif volatility:
+        factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Volatility.pkl'))

@@ -5,9 +5,10 @@ import os
 os.chdir('/Users/lihaohan/Alpha_Research')
 from decorators import do_on_dfs
 from functools import reduce
-import polars as pl
+#import polars as pl
 import mpire
-from typing import Union
+from typing import Callable, Union, Dict, List, Tuple
+import matplotlib.pyplot as plt
 import datetime
 
 from pandarallel import pandarallel
@@ -15,7 +16,7 @@ pandarallel.initialize(progress_bar=False, nb_workers=10)
 
 
 
-do_on_dfs
+@do_on_dfs
 def standardlize(df: pd.DataFrame, all_pos: bool = 0) -> pd.DataFrame:
     """对因子dataframe做横截面z-score标准化
 
@@ -79,7 +80,7 @@ def clip_mad(
     df: pd.DataFrame, 
     n: float = 5, 
     replace: bool = 1, 
-    keep_trend: bool = 1
+    keep_trend: bool = 0
 ) -> pd.DataFrame:
     if keep_trend:
         df = df.stack().reset_index()
@@ -210,7 +211,7 @@ def clip(
         return clip_percentile(df, parameter[0], parameter[1])
     else:
         raise ValueError("参数输入错误")
-
+'''
 def de_cross_polars(
     y: Union[pd.DataFrame, pl.DataFrame],
     xs: Union[list[pd.DataFrame], list[pl.DataFrame]],
@@ -259,7 +260,7 @@ def de_cross_polars(
         .set_index("date")
     )
     return y
-
+'''
 def np_ols(X, y):
     """
     参数:
@@ -281,8 +282,10 @@ def de_cross(y, x_list):
     返回：
     pd.DataFrame,正交化后的残差。
     """
-    index_list = [df.index for df in [y]+x_list]
-    dates = reduce(lambda x, y: x.intersection(y), index_list)
+    
+    dfs = [y] + x_list
+    dfs = same_index(same_columns(dfs))
+    dates = dfs[0].index
     def one(timestamp):
         y_series = y.loc[timestamp]
         xs = pd.concat([x.loc[timestamp].to_frame(str(num)) for num,x in enumerate(x_list)],axis=1)
@@ -337,3 +340,198 @@ def convert_to_daily_(
     #ff = ff[ff.date >= pd.Timestamp("2004-01-01")]
     return ff
 
+
+@do_on_dfs
+def add_cross_standardlize(*args: list) -> pd.DataFrame:
+    """将众多因子横截面做z-score标准化之后相加
+
+    Returns
+    -------
+    `pd.DataFrame`
+        合成后的因子
+    """
+    res = reduce(lambda x, y: x + y, [standardlize(i) for i in args])
+    return res
+
+
+def show_corr(
+    fac1: pd.DataFrame,
+    fac2: pd.DataFrame,
+    method: str = "pearson",
+    plt_plot: bool = 1,
+    show_series: bool = 0,
+) -> float:
+    """展示两个因子的截面相关性
+
+    Parameters
+    ----------
+    fac1 : pd.DataFrame
+        因子1
+    fac2 : pd.DataFrame
+        因子2
+    method : str, optional
+        计算相关系数的方法, by default "pearson"
+    plt_plot : bool, optional
+        是否画出相关系数的时序变化图, by default 1
+    show_series : bool, optional
+        返回相关性的序列，而非均值
+
+    Returns
+    -------
+    `float`
+        平均截面相关系数
+    """
+    corr = fac1.corrwith(fac2, axis=1, method=method)
+    if show_series:
+        return corr
+    else:
+        if plt_plot:
+            corr.plot(rot=60)
+            plt.show()
+        return corr.mean()
+
+
+def show_corrs(
+    factors: list[pd.DataFrame],
+    factor_names: list[str] = None,
+    print_bool: bool = True,
+    show_percent: bool = True,
+    method: str = "pearson",
+) -> pd.DataFrame:
+    """展示很多因子两两之间的截面相关性
+
+    Parameters
+    ----------
+    factors : list[pd.DataFrame]
+        所有因子构成的列表, by default None
+    factor_names : list[str], optional
+        上述因子依次的名字, by default None
+    print_bool : bool, optional
+        是否打印出两两之间相关系数的表格, by default True
+    show_percent : bool, optional
+        是否以百分数的形式展示, by default True
+    method : str, optional
+        计算相关系数的方法, by default "pearson"
+
+    Returns
+    -------
+    `pd.DataFrame`
+        两两之间相关系数的表格
+    """
+    corrs = []
+    for i in range(len(factors)):
+        main_i = factors[i]
+        follows = factors[i + 1 :]
+        corr = [show_corr(main_i, i, plt_plot=False, method=method) for i in follows]
+        corr = [np.nan] * (i + 1) + corr
+        corrs.append(corr)
+    if factor_names is None:
+        factor_names = [f"fac{i}" for i in list(range(1, len(factors) + 1))]
+    corrs = pd.DataFrame(corrs, columns=factor_names, index=factor_names)
+    np.fill_diagonal(corrs.to_numpy(), 1)
+    corrs=pd.DataFrame(corrs.fillna(0).to_numpy()+corrs.fillna(0).to_numpy().T-np.diag(np.diag(corrs)),index=corrs.index,columns=corrs.columns)
+    if show_percent:
+        pcorrs = corrs.applymap(to_percent)
+    else:
+        pcorrs = corrs.copy()
+    if print_bool:
+        return pcorrs
+    else:
+        return corrs
+
+
+def same_columns(dfs: List[pd.DataFrame]) -> List[pd.DataFrame]:
+    """保留多个dataframe共同columns的部分
+
+    Parameters
+    ----------
+    dfs : List[pd.DataFrame]
+        多个dataframe
+
+    Returns
+    -------
+    List[pd.DataFrame]
+        保留共同部分后的结果
+    """
+    dfs = [i.T for i in dfs]
+    res = []
+    for i, df in enumerate(dfs):
+        others = dfs[:i] + dfs[i + 1 :]
+
+        for other in others:
+            df = df[df.index.isin(other.index)]
+        res.append(df.T)
+    return res
+
+
+def same_index(dfs: List[pd.DataFrame]) -> List[pd.DataFrame]:
+    """保留多个dataframe共同index的部分
+
+    Parameters
+    ----------
+    dfs : List[pd.DataFrame]
+        多个dataframe
+
+    Returns
+    -------
+    List[pd.DataFrame]
+        保留共同部分后的结果
+    """
+    res = []
+    for i, df in enumerate(dfs):
+        others = dfs[:i] + dfs[i + 1 :]
+
+        for other in others:
+            df = df[df.index.isin(other.index)]
+        res.append(df)
+    return res
+
+
+
+
+def ind_neutralize(factor_df, factor_name, industry_df):
+    """
+    Description
+    ----------
+    对每期因子进行行业中性化
+    方法: 先用pd.get_dummies生成行业虚拟变量, 然后用带截距项回归得到残差作为因子
+
+    Parameters
+    ----------
+    factor_df: pandas.DataFrame,因子值,格式为trade_date,stock_code,factor
+    factor_name: str. 因子名称
+    industry_df: pandas.DataFrame, 股票所属行业, 格式为trade_date,stock_code,ind_code
+
+    Return
+    ----------
+    pandas.DataFrame.行业中性化后的因子数据
+    """
+    df = pd.merge(factor_df, industry_df, on=["date", "code"])
+    g = df.groupby("date", group_keys=False)
+    df = g.apply(_single_ind_neutralize, factor_name)
+    df = df[["date", "code", factor_name]].copy()
+    return df
+
+
+def _single_ind_neutralize(df, factor_name):
+    """
+    Description
+    ----------
+    对单期因子进行行业中性化
+
+    Parameters
+    ----------
+    df: pandas.DataFrame, 因子值和行业的df, 格式为trade_date,stock_code,'factor_name',dummy_ind_code
+    factor_name: str. 因子名称
+
+    Return
+    ----------
+    pandas.DataFrame.行业中性化后的因子数据
+    """
+    x = df.iloc[:, 3:].values
+    y = df[factor_name].values
+    X = np.hstack([np.ones((x.shape[0], 1)), x])
+    # 计算回归残差
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    df[factor_name] = y - X @ beta
+    return df

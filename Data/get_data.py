@@ -169,6 +169,28 @@ def read_market(
         df = df.resample(freq).last()
     return df.dropna(how='all')
 
+@cachier()
+def get_industry_dummies(start = DATE1,
+                         is_stack = 1):
+
+    sw_ind_path = '/Volumes/T7Shield/Alpha_Research'
+    sw_ind = pd.read_pickle(os.path.join(sw_ind_path, 'sw_dummies.pkl'))
+    sw_ind = sw_ind[sw_ind.date >= start]
+    sw_ind.reset_index(drop=True, inplace=True)
+    if is_stack:
+        return sw_ind
+    else:
+        ind_cols = list(sw_ind.columns)[2:]
+        res = {}
+        for ind in ind_cols:
+            df = sw_ind[["date", "code", ind]]
+            df = df.pivot(index="date", columns="code", values=ind)
+            df = df.fillna(0)
+            df.index = pd.to_datetime(df.index)
+            res[ind] = df
+        return res
+
+
 
 def read_Barra_factor(
         dividend: bool = 0,
@@ -196,3 +218,11 @@ def read_Barra_factor(
         factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Value.pkl'))
     elif volatility:
         factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Volatility.pkl'))
+'''
+@cachier()
+def read_filter_con(
+    st: bool = 0,
+    suspend: bool = 0,
+    limit_up: bool = 0,
+):
+'''

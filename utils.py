@@ -5,11 +5,13 @@ import os
 os.chdir('/Users/lihaohan/Alpha_Research')
 from decorators import do_on_dfs
 from functools import reduce
-#import polars as pl
 import mpire
 from typing import Callable, Union, Dict, List, Tuple
 import matplotlib.pyplot as plt
 import datetime
+import scipy.stats as ss
+import tqdm.auto
+import joblib
 
 from pandarallel import pandarallel
 pandarallel.initialize(progress_bar=False, nb_workers=10)
@@ -211,56 +213,7 @@ def clip(
         return clip_percentile(df, parameter[0], parameter[1])
     else:
         raise ValueError("参数输入错误")
-'''
-def de_cross_polars(
-    y: Union[pd.DataFrame, pl.DataFrame],
-    xs: Union[list[pd.DataFrame], list[pl.DataFrame]],
-) -> pd.DataFrame:
-    """因子正交函数, 使用polars库实现
 
-    Parameters
-    ----------
-    y : Union[pd.DataFrame, pl.DataFrame]
-        要研究的因子, 形式与h5存数据的形式相同, index是时间, columns是股票
-    xs : Union[list[pd.DataFrame], list[pl.DataFrame]]
-        要被正交掉的干扰因子们, 传入一个列表, 每个都是h5存储的那种形式的df, index是时间, columns是股票
-
-    Returns
-    -------
-    pd.DataFrame
-        正交后的残差, 形式与y相同, index是时间, columns是股票
-    """
-    if isinstance(y, pd.DataFrame):
-        y.index.name='date'
-        y = pl.from_pandas(y.reset_index())
-    if isinstance(xs[0], pd.DataFrame):
-        for i in range(len(xs)):
-            xs[i].index.name='date'
-        xs = [pl.from_pandas(x.reset_index()) for x in xs]
-    y = y.unpivot(index="date", variable_name="code").drop_nulls()
-    xs = [x.unpivot(index="date", variable_name="code").drop_nulls() for x in xs]
-    for num, i in enumerate(xs):
-        y = y.join(i, on=["date", "code"], suffix=f"_{num}")
-    y = (
-        y.select(
-            "date",
-            "code",
-            pl.col("value")
-            .least_squares.ols(
-                *[pl.col(f"value_{i}") for i in range(len(xs))],
-                add_intercept=True,
-                mode="residuals",
-            )
-            .over("date")
-            .alias("resid"),
-        )
-        .pivot("code", index="date", values="resid")
-        .sort('date')
-        .to_pandas()
-        .set_index("date")
-    )
-    return y
-'''
 def np_ols(X, y):
     """
     参数:
@@ -489,49 +442,519 @@ def same_index(dfs: List[pd.DataFrame]) -> List[pd.DataFrame]:
 
 
 
-def ind_neutralize(factor_df, factor_name, industry_df):
-    """
-    Description
-    ----------
-    对每期因子进行行业中性化
-    方法: 先用pd.get_dummies生成行业虚拟变量, 然后用带截距项回归得到残差作为因子
+@do_on_dfs
+def add_suffix(code: str) -> str:
+    """给股票代码加上后缀
 
-    Parameters
+    Params
     ----------
-    factor_df: pandas.DataFrame,因子值,格式为trade_date,stock_code,factor
-    factor_name: str. 因子名称
-    industry_df: pandas.DataFrame, 股票所属行业, 格式为trade_date,stock_code,ind_code
+    code : str
+        纯数字组成的字符串类型的股票代码,如000001
 
-    Return
-    ----------
-    pandas.DataFrame.行业中性化后的因子数据
+    Returns
+    -------
+    str
+        添加完后缀后的股票代码, 如000001.SZ
     """
-    df = pd.merge(factor_df, industry_df, on=["date", "code"])
-    g = df.groupby("date", group_keys=False)
-    df = g.apply(_single_ind_neutralize, factor_name)
-    df = df[["date", "code", factor_name]].copy()
+    if not isinstance(code, str):
+        code = str(code)
+    if len(code) < 6:
+        code = "0" * (6 - len(code)) + code
+    if code.startswith("0") or code.startswith("3"):
+        code = ".".join([code, "SZ"])
+    elif code.startswith("6"):
+        code = ".".join([code, "SH"])
+    elif code.startswith("8"):
+        code = ".".join([code, "BJ"])
+    return code
+
+@do_on_dfs
+def get_value(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    """很多因子计算时，会一次性生成很多值，使用时只取出一个值
+
+    Params
+    ----------
+    df : pd.DataFrame
+        每个value是一个列表或元组的pd.DataFrame
+    n : int
+        取第n个值
+
+    Returns
+    -------
+    `pd.DataFrame`
+        仅有第n个值构成的pd.DataFrame
+    """
+
+    def get_value_single(x, n):
+        try:
+            return x[n]
+        except Exception:
+            return np.nan
+
+    df = df.applymap(lambda x: get_value_single(x, n))
     return df
 
 
-def _single_ind_neutralize(df, factor_name):
-    """
-    Description
+def merge_many(
+    dfs: List[pd.DataFrame], names: list = None, how: str = "outer"
+) -> pd.DataFrame:
+    """将多个宽dataframe依据columns和index, 拼接在一起, 拼成一个长dataframe
+
+    Params
     ----------
-    对单期因子进行行业中性化
+    dfs : List[pd.DataFrame]
+        将所有要拼接的宽表放在一个列表里
+    names : list, optional
+        拼接后，每一列宽表对应的名字, by default None
+    how : str, optional
+        拼接的方式, by default 'outer'
+
+    Returns
+    -------
+    pd.DataFrame
+        拼接后的dataframe
+    """
+    num = len(dfs)
+    if names is None:
+        names = [f"fac{i+1}" for i in range(num)]
+    dfs = [i.stack().reset_index() for i in dfs]
+    dfs = [i.rename(columns={list(i.columns)[-1]: j}) for i, j in zip(dfs, names)]
+    dfs = [
+        i.rename(columns={list(i.columns)[-2]: "code", list(i.columns)[0]: "date"})
+        for i in dfs
+    ]
+    df = reduce(lambda x, y: pd.merge(x, y, on=["date", "code"], how=how), dfs)
+    return df
+
+@do_on_dfs
+def drop_duplicates_index(new: pd.DataFrame) -> pd.DataFrame:
+    """对dataframe依照其index进行去重, 并保留最上面的行
+
+    Parames
+    ----------
+    new : pd.DataFrame
+        要去重的dataframe
+
+    Returns
+    -------
+    pd.DataFrame
+        去重后的dataframe
+    """
+    pri_name = new.index.name
+    new = new.reset_index()
+    new = new.rename(
+        columns={
+            list(new.columns)[0]: "tmp_name_for_this_function_never_same_to_others"
+        }
+    )
+    new = new.drop_duplicates(
+        subset=["tmp_name_for_this_function_never_same_to_others"], keep="first"
+    )
+    new = new.set_index("tmp_name_for_this_function_never_same_to_others")
+    if pri_name == "tmp_name_for_this_function_never_same_to_others":
+        new.index.name = "date"
+    else:
+        new.index.name = pri_name
+    return new
+
+def select_max(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
+    """两个columns与index完全相同的df, 每个值都挑出较大值
 
     Parameters
     ----------
-    df: pandas.DataFrame, 因子值和行业的df, 格式为trade_date,stock_code,'factor_name',dummy_ind_code
-    factor_name: str. 因子名称
+    df1 : pd.DataFrame
+        第一个df
+    df2 : pd.DataFrame
+        第二个df
 
-    Return
-    ----------
-    pandas.DataFrame.行业中性化后的因子数据
+    Returns
+    -------
+    `pd.DataFrame`
+        两个df每个value中的较大者
     """
-    x = df.iloc[:, 3:].values
-    y = df[factor_name].values
-    X = np.hstack([np.ones((x.shape[0], 1)), x])
-    # 计算回归残差
-    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-    df[factor_name] = y - X @ beta
+    return (df1 + df2 + np.abs(df1 - df2)) / 2
+
+def select_min(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
+    """两个columns与index完全相同的df, 每个值都挑出较小值
+
+    Parameters
+    ----------
+    df1 : pd.DataFrame
+        第一个df
+    df2 : pd.DataFrame
+        第二个df
+
+    Returns
+    -------
+    `pd.DataFrame`
+        两个df每个value中的较小者
+    """
+    return (df1 + df2 - np.abs(df1 - df2)) / 2
+
+@do_on_dfs
+def debj(df: pd.DataFrame) -> pd.DataFrame:
+    """去除因子中的北交所数据
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        包含北交所的因子dataframe, index是时间, columns是股票代码
+
+    Returns
+    -------
+    pd.DataFrame
+        去除北交所股票的因子dataframe
+    """
+    df = df[[i for i in list(df.columns) if i[0] in ["0", "3", "6"]]]
     return df
+
+@do_on_dfs
+def detect_nan(df: pd.DataFrame) -> bool:
+    """检查一个pd.DataFrame中是否存在空值
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        待检查的pd.DataFrame
+
+    Returns
+    -------
+    `bool`
+        检查结果, 有空值为True, 否则为False
+    """
+    x = df.isna() + 0
+    if x.sum().sum():
+        print("存在空值")
+        return True
+    else:
+        print("不存在空值")
+        return False
+
+
+@do_on_dfs
+def get_abs(df: pd.DataFrame, quantile: float = None, square: bool = 0) -> pd.DataFrame:
+    """均值距离化：计算因子与截面均值的距离
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        未均值距离化的因子, index为时间, columns为股票代码
+    quantile : bool, optional
+        为1则计算到某个分位点的距离, by default None
+    square : bool, optional
+        为1则计算距离的平方, by default 0
+
+    Returns
+    -------
+    `pd.DataFrame`
+        均值距离化之后的因子值
+    """
+    if not square:
+        if quantile is not None:
+            return np.abs((df.T - df.T.quantile(quantile)).T)
+        else:
+            return np.abs((df.T - df.T.mean()).T)
+    else:
+        if quantile is not None:
+            return ((df.T - df.T.quantile(quantile)).T) ** 2
+        else:
+            return ((df.T - df.T.mean()).T) ** 2
+
+@do_on_dfs
+def get_normal(df: pd.DataFrame) -> pd.DataFrame:
+    """将因子横截面正态化
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        原始因子, index是时间, columns是股票代码
+
+    Returns
+    -------
+    `pd.DataFrame`
+        每个横截面都呈现正态分布的因子
+    """
+    df = df.replace(0, np.nan)
+    df = df.T.apply(lambda x: ss.boxcox(x)[0]).T
+    return df
+
+
+@do_on_dfs
+def coin_reverse(
+    ret20: pd.DataFrame, vol20: pd.DataFrame, mean: bool = 1, positive_negtive: bool = 0
+) -> pd.DataFrame:
+    """球队硬币法: 根据vol20的大小, 翻转一半ret20, 把vol20较大的部分, 给ret20添加负号
+
+    Parameters
+    ----------
+    ret20 : pd.DataFrame
+        要被翻转的因子, index是时间, columns是股票代码
+    vol20 : pd.DataFrame
+        翻转的依据, index是时间, columns是股票代码
+    mean : bool, optional
+        为1则以是否大于截面均值为标准翻转, 否则以是否大于截面中位数为标准, by default 1
+    positive_negtive : bool, optional
+        是否截面上正负值的两部分，各翻转一半, by default 0
+
+    Returns
+    -------
+    `pd.DataFrame`
+        翻转后的因子值
+    """
+    if positive_negtive:
+        if not mean:
+            down20 = np.sign(ret20)
+            down20 = down20.replace(1, np.nan)
+            down20 = down20.replace(-1, 1)
+
+            vol20_down = down20 * vol20
+            vol20_down = (vol20_down.T - vol20_down.T.median()).T
+            vol20_down = np.sign(vol20_down)
+            ret20_down = ret20[ret20 < 0]
+            ret20_down = vol20_down * ret20_down
+
+            up20 = np.sign(ret20)
+            up20 = up20.replace(-1, np.nan)
+
+            vol20_up = up20 * vol20
+            vol20_up = (vol20_up.T - vol20_up.T.median()).T
+            vol20_up = np.sign(vol20_up)
+            ret20_up = ret20[ret20 > 0]
+            ret20_up = vol20_up * ret20_up
+
+            ret20_up = ret20_up.replace(np.nan, 0)
+            ret20_down = ret20_down.replace(np.nan, 0)
+            new_ret20 = ret20_up + ret20_down
+            new_ret20_tr = new_ret20.replace(0, np.nan)
+            return new_ret20_tr
+        else:
+            down20 = np.sign(ret20)
+            down20 = down20.replace(1, np.nan)
+            down20 = down20.replace(-1, 1)
+
+            vol20_down = down20 * vol20
+            vol20_down = (vol20_down.T - vol20_down.T.mean()).T
+            vol20_down = np.sign(vol20_down)
+            ret20_down = ret20[ret20 < 0]
+            ret20_down = vol20_down * ret20_down
+
+            up20 = np.sign(ret20)
+            up20 = up20.replace(-1, np.nan)
+
+            vol20_up = up20 * vol20
+            vol20_up = (vol20_up.T - vol20_up.T.mean()).T
+            vol20_up = np.sign(vol20_up)
+            ret20_up = ret20[ret20 > 0]
+            ret20_up = vol20_up * ret20_up
+
+            ret20_up = ret20_up.replace(np.nan, 0)
+            ret20_down = ret20_down.replace(np.nan, 0)
+            new_ret20 = ret20_up + ret20_down
+            new_ret20_tr = new_ret20.replace(0, np.nan)
+            return new_ret20_tr
+    else:
+        if not mean:
+            vol20_dummy = np.sign((vol20.T - vol20.T.median()).T)
+            ret20 = ret20 * vol20_dummy
+            return ret20
+        else:
+            vol20_dummy = np.sign((vol20.T - vol20.T.mean()).T)
+            ret20 = ret20 * vol20_dummy
+            return ret20
+        
+
+@do_on_dfs
+def multidfs_to_one(*args: list) -> pd.DataFrame:
+    """很多个df, 各有一部分, 其余位置都是空，
+    想把各自df有值的部分保留, 都没有值的部分继续设为空
+
+    Returns
+    -------
+    `pd.DataFrame`
+        合并后的df
+    """
+    dfs = [i.fillna(0) for i in args]
+    background = np.sign(np.abs(np.sign(sum(dfs))) + 1).replace(1, 0)
+    dfs = [(i + background).fillna(0) for i in dfs]
+    df_nans = [i.isna() for i in dfs]
+    nan = reduce(lambda x, y: x * y, df_nans)
+    nan = nan.replace(1, np.nan)
+    nan = nan.replace(0, 1)
+    df_final = sum(dfs) * nan
+    return df_final
+
+
+def calc_exp_list(window: int, half_life: int) -> np.ndarray:
+    """生成半衰序列
+
+    Parameters
+    ----------
+    window : int
+        窗口期
+    half_life : int
+        半衰期
+
+    Returns
+    -------
+    `np.ndarray`
+        半衰序列
+    """
+    exp_wt = np.asarray([0.5 ** (1 / half_life)] * window) ** np.arange(window)
+    return exp_wt[::-1] / np.sum(exp_wt)
+
+def calcWeightedStd(series: pd.Series, weights: Union[pd.Series, np.ndarray]) -> float:
+    """计算半衰加权标准差
+
+    Parameters
+    ----------
+    series : pd.Series
+        目标序列
+    weights : Union[pd.Series,np.ndarray]
+        权重序列
+
+    Returns
+    -------
+    `float`
+        半衰加权标准差
+    """
+    weights /= np.sum(weights)
+    return np.sqrt(np.sum((series - np.mean(series)) ** 2 * weights))
+
+
+def get_list_std(delta_sts: List[pd.DataFrame]) -> pd.DataFrame:
+    """同一天多个因子，计算这些因子在当天的标准差
+
+    Parameters
+    ----------
+    delta_sts : List[pd.DataFrame]
+        多个因子构成的list, 每个因子index为时间, columns为股票代码
+
+    Returns
+    -------
+    `pd.DataFrame`
+        每天每只股票多个因子的标准差
+    """
+    delta_sts_mean = sum(delta_sts) / len(delta_sts)
+    delta_sts_std = [(i - delta_sts_mean) ** 2 for i in delta_sts]
+    delta_sts_std = sum(delta_sts_std)
+    delta_sts_std = delta_sts_std**0.5 / len(delta_sts) ** 0.5
+    return delta_sts_std
+
+
+def get_list_std_weighted(delta_sts: List[pd.DataFrame], weights: list) -> pd.DataFrame:
+    """对多个df对应位置上的值求加权标准差
+
+    Parameters
+    ----------
+    delta_sts : List[pd.DataFrame]
+        多个dataframe
+    weights : list
+        权重序列
+
+    Returns
+    -------
+    pd.DataFrame
+        标准差序列
+    """
+    weights = [i / sum(weights) for i in weights]
+    delta_sts_mean = sum(delta_sts) / len(delta_sts)
+    delta_sts_std = [(i - delta_sts_mean) ** 2 for i in delta_sts]
+    delta_sts_std = sum([i * j for i, j in zip(delta_sts_std, weights)])
+    return delta_sts_std**0.5
+
+
+@do_on_dfs
+def to_group(df: pd.DataFrame, group: int = 10) -> pd.DataFrame:
+    """把一个index为时间, columns为code的df, 每个截面上的值, 按照排序分为group组, 将值改为组号, 从0开始
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        要改为组号的df
+    group : int, optional
+        分为多少组, by default 10
+
+    Returns
+    -------
+    pd.DataFrame
+        组号组成的dataframe
+    """
+    df = df.T.apply(lambda x: pd.qcut(x, group, labels=False, duplicates="drop")).T
+    return df
+
+def zip_many_dfs(dfs: List[pd.DataFrame]) -> pd.DataFrame:
+    """将多个dataframe, 拼在一起, 相同index和columns指向的那个values, 变为多个dataframe的值的列表
+    通常用于存储整合分钟数据计算的因子值
+
+    Parameters
+    ----------
+    dfs : List[pd.DataFrame]
+        多个dataframe, 每一个的values都是float形式
+
+    Returns
+    -------
+    pd.DataFrame
+        整合后的dataframe, 每一个values都是list的形式
+    """
+    df = merge_many(dfs)
+    cols = [df[f"fac{i}"] for i in range(1, len(dfs) + 1)]
+    df = df.assign(fac=pd.Series(zip(*cols)))
+    df = df.pivot(index="date", columns="code", values="fac")
+    return df
+
+def get_values(df: pd.DataFrame,n_jobs:int=40) -> List[pd.DataFrame]:
+    """从一个values为列表的dataframe中, 一次性取出所有值, 分别设置为一个dataframe, 并依照顺序存储在列表中
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        一个values为list的dataframe
+
+    Returns
+    -------
+    List[pd.DataFrame]
+        多个dataframe, 每一个的values都是float形式
+    """
+    d = df.dropna(how="all", axis=1)
+    d = d.iloc[:, 0].dropna()
+    num = len(d.iloc[0])
+    if n_jobs>1:
+        facs=joblib.Parallel(n_jobs=40)(joblib.delayed(get_value)(df, x) for x in tqdm.auto.tqdm(list(range(num))))
+    else:
+        facs = list(map(lambda x: get_value(df, x), range(num)))
+
+    return facs
+
+def judge_factor_by_third(
+    fac1: pd.DataFrame, fac2: pd.DataFrame, judge: Union[pd.DataFrame, pd.Series]
+) -> pd.DataFrame:
+    """对于fac1和fac2两个因子，依据judge这个series或dataframe进行判断，
+    judge可能为全市场的某个时序指标，也可能是每个股票各一个的指标，
+    如果judge这一期的值大于0，则取fac1的值，小于0则取fac2的值
+
+    Parameters
+    ----------
+    fac1 : pd.DataFrame
+        因子1, index为时间, columns为股票代码, values为因子值
+    fac2 : pd.DataFrame
+        因子2, index为时间, columns为股票代码, values为因子值
+    judge : Union[pd.DataFrame,pd.Series]
+        市场指标或个股指标, 为市场指标时, 则输入series形式, index为时间, values为指标值
+        为个股指标时, 则输入dataframe形式, index为时间, columns为股票代码, values为因子值
+
+    Returns
+    -------
+    pd.DataFrame
+        合成后的因子值, index为时间, columns为股票代码, values为因子值
+    """
+    if isinstance(judge, pd.Series):
+        judge = pd.DataFrame(
+            {k: list(judge) for k in list(fac1.columns)}, index=judge.index
+        )
+    s1 = (judge > 0) + 0
+    s2 = (judge < 0) + 0
+    fac1 = fac1 * s1
+    fac2 = fac2 * s2
+    fac = fac1 + fac2
+    have = np.sign(fac1.abs() + 1)
+    return fac * have

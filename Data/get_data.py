@@ -218,11 +218,15 @@ def read_Barra_factor(
         factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Value.pkl'))
     elif volatility:
         factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Volatility.pkl'))
-'''
+
 @cachier()
 def read_filter_con(
     st: bool = 0,
     suspend: bool = 0,
     limit_up: bool = 0,
+    start_date = DATE1,
+    end_date = DATE2,
 ):
-'''
+    if 
+    
+

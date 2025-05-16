@@ -79,7 +79,7 @@ class Reverse_M(BaseFactor):
     
     def run(self, pool: bool = False):
         self.generate_factor()
-        if bool:
+        if pool:
             self.clear_factor()
         self.save()
         

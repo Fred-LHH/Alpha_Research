@@ -72,12 +72,13 @@ class PoolFactor:
                         daily=daily,
                         min_periods=min_periods)
     
-    def run(self):
+    def run(self, is_smooth: bool=False):
         self.remove_newstock()
         self.remove_st()
         self.remove_suspend()
         self.remove_limit()
-        #self.smooth_factor()
+        if is_smooth:
+            self.smooth_factor()
         
 
 

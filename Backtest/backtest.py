@@ -89,17 +89,6 @@ class Alpha(object):
         """
         index为时间, columns为股票代码
         """
-        '''
-        db.cursor.execute('SELECT * FROM st')
-        st = pd.DataFrame(db.cursor.fetchall(), columns=[i[0] for i in db.cursor.description])
-        st.replace(0, np.nan, inplace=True)
-        db.cursor.execute('SELECT * FROM limit_status')
-        limit_status = pd.DataFrame(db.cursor.fetchall(), columns=[i[0] for i in db.cursor.description])
-        limit_status.replace(0, np.nan, inplace=True)
-        db.cursor.execute('SELECT * FROM suspend')
-        suspend = pd.DataFrame(db.cursor.fetchall(), columns=[i[0] for i in db.cursor.description])
-        suspend.replace(0, np.nan, inplace=True)
-        '''
         if self.freq is not 'D':
             #st = st.resample(self.freq).last()
             #limit_status = limit_status.resample(self.freq).last()

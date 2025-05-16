@@ -170,6 +170,14 @@ def read_market(
     return df.dropna(how='all')
 
 @cachier()
+def read_sw_industry():
+    table_name = DB_NAME['sw']
+    sql = 'select l1code, ts_code, in_date, out_date from {}'.format(table_name)
+    db.cursor.execute(sql)
+    
+
+
+@cachier()
 def get_industry_dummies(start = DATE1,
                          is_stack = 1):
 
@@ -218,15 +226,38 @@ def read_Barra_factor(
         factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Value.pkl'))
     elif volatility:
         factor = pd.read_pickle(os.path.join(BARRA_FACTOR_PATH, 'Volatility.pkl'))
+    else:
+        raise IOError('总得读点什么吧')
 
 @cachier()
 def read_filter_con(
     st: bool = 0,
     suspend: bool = 0,
-    limit_up: bool = 0,
+    limit: bool = 0,
     start_date = DATE1,
     end_date = DATE2,
+    freq: str = 'D',
 ):
-    if 
+    if st:
+        table_name = DB_NAME['st']
+        sql = 'select * from {} where date >= %s and date <= %s'.format(table_name)
+    elif suspend:
+        table_name = DB_NAME['suspend']
+        sql = 'select * from {} where date >= %s and date <= %s'.format(table_name)
+    elif limit:
+        table_name = DB_NAME['up_down_limit']
+        sql = 'select * from {} where date >= %s and date <= %s'.format(table_name)
+    else:
+        raise IOError('总得读点什么吧')
+    
+    params = (start_date, end_date)
+    db.cursor.execute(sql, params)
+    df = pd.DataFrame(db.cursor.fetchall(), columns=[i[0] for i in db.cursor.description])
+    df['date'] = df['date'].apply(pd.Timestamp)
+    df.sort_values(by=['code', 'date'], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    return df
+    
+    
     
 

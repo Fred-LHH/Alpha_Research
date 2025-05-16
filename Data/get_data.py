@@ -236,7 +236,6 @@ def read_filter_con(
     limit: bool = 0,
     start_date = DATE1,
     end_date = DATE2,
-    freq: str = 'D',
 ):
     if st:
         table_name = DB_NAME['st']

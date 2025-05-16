@@ -8,13 +8,14 @@ from Data.get_data import read_daily
 
 class Reverse_M(BaseFactor):
     """
-    反转因子的W式切割
+    开源(1):反转因子的W式切割
     将过去20日的涨跌幅分解出动量(M_low)和反转(M_high)
+    理想反转因子的交易行为逻辑是A股反转之力的微观来源是大单成交
     """
 
     def __init__(self, 
                  factor_name='Reverse_M', 
-                 data_path='/Volumes/T7Shield/ProcessedData', 
+                 data_path='/Users/lihaohan/Desktop/研报复现/测试数据', 
                  factor_parameters={'quantile': 15 / 16}, 
                  save_path='/Volumes/T7Shield/Alpha_Research/Factor'):
         super(Reverse_M, self).__init__(factor_name=factor_name,
@@ -30,8 +31,10 @@ class Reverse_M(BaseFactor):
     
     def generate_factor(self, start_date, end_date):
         files = self.prepare_data()
-        ret = read_daily(ret=1, start_date=start_date, end_date=end_date, freq='D')
-        ret.index = pd.to_datetime(ret.index)
+        close = read_daily(close=1, start_date=start_date, end_date=end_date, freq='D')
+        close = close.astype(np.float32)
+        ret = close / close.shift(1) - 1
+        ret.index = pd.to_datetime(ret.index, format='%Y-%m-%d', errors='coerce')
         ret = ret.stack().reset_index()
         ret.columns = ['date', 'code', 'ret']
         def calculator(file):
@@ -39,14 +42,14 @@ class Reverse_M(BaseFactor):
                 code = file.split('.')[0]
                 data = pd.read_pickle(os.path.join(self.data_path, file))
                 data = data[['date', 'code']].assign(mean_amount=data['amount'] / data['volume'])
-                data['date'] = pd.to_datetime(data['date'])
+                data['date'] = pd.to_datetime(data['date'], format='%Y-%m-%d', errors='coerce')
                 mask = (data['date'] >= pd.to_datetime(start_date)) & (data['date'] <= pd.to_datetime(end_date))
                 data = data[mask]
                 if data.empty:
                     return pd.DataFrame()
                 
                 def M(group):
-                    return np.quantile(group['mean_amount'], self.factor_parameters['quantile'])
+                    return np.quantile(group['mean_amount'].dropna(), self.factor_parameters['quantile'])
                 
                 quantiles = data.groupby(['date', 'code']).apply(M).reset_index()
                 quantiles.columns = ['date', 'code', 'M']
@@ -54,13 +57,13 @@ class Reverse_M(BaseFactor):
                 res = []
                 for i in range(19, len(merged)):
                     rolling_window = merged.iloc[i-19:i+1]
-                    high_quantile = rolling_window.nlargest(10, 'quantile')
-                    low_quantile = rolling_window.nsmallest(10, 'quantile')
+                    high_quantile = rolling_window.nlargest(10, 'M')
+                    low_quantile = rolling_window.nsmallest(10, 'M')
 
                     M_high = high_quantile['ret'].sum()
                     M_low = low_quantile['ret'].sum()
                     M = M_high - M_low
-                    res.append({'date': rolling_window['date'].iloc[-1], 'code': code, 'factor': M, 'M_high': M_high, 'M_low': M_low})
+                    res.append({'date': rolling_window['date'].iloc[-1], 'code': code, 'Reverse_M': M, 'M_high': M_high, 'M_low': M_low})
 
                 factor = pd.DataFrame(res)
                 return factor

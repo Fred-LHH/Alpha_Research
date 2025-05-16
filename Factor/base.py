@@ -28,7 +28,7 @@ class BaseFactor(object):
         """
 
         self.factor_name = factor_name
-        self.factor_param = factor_parameters
+        self.factor_parameters = factor_parameters
         self.factor = pd.DataFrame()
         # data路径
         if not save_path:
@@ -76,7 +76,8 @@ class BaseFactor(object):
             return
         
         pool = PoolFactor(self.factor, self.factor_name)
-        return pool.run()
+        pool.run()
+        self.factor = pool.factor
 
         
     def _get_trading_days(self, start_date, end_date):

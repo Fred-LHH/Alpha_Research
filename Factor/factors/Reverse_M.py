@@ -15,7 +15,7 @@ class Reverse_M(BaseFactor):
 
     def __init__(self, 
                  factor_name='Reverse_M', 
-                 data_path='/Users/lihaohan/Desktop/研报复现/测试数据', 
+                 data_path='/Volumes/T7Shield/ProcessedData', 
                  factor_parameters={'quantile': 15 / 16}, 
                  save_path='/Volumes/T7Shield/Alpha_Research/Factor'):
         super(Reverse_M, self).__init__(factor_name=factor_name,
@@ -49,7 +49,9 @@ class Reverse_M(BaseFactor):
                     return pd.DataFrame()
                 
                 def M(group):
-                    return np.quantile(group['mean_amount'].dropna(), self.factor_parameters['quantile'])
+                    if group['mean_amount'].dropna().empty:
+                        return np.nan
+                    return np.quantile(group['mean_amount'].dropna(), 15 / 16)
                 
                 quantiles = data.groupby(['date', 'code']).apply(M).reset_index()
                 quantiles.columns = ['date', 'code', 'M']

@@ -5,6 +5,11 @@ import numpy as np
 from Data.get_data import *
 from Factor.pool import PoolFactor
 
+def get_rolling_data(data, days, rows_per_day):
+    rows_per_batch = rows_per_day * days
+    for start in range(0, len(data) - rows_per_batch + 1, rows_per_day):
+        yield data.iloc[start:start + rows_per_batch]
+
 
 class BaseFactor(object):
     """
@@ -75,9 +80,13 @@ class BaseFactor(object):
         if self.factor is None or len(self.factor) == 0:
             return
         
-        pool = PoolFactor(self.factor, self.factor_name)
-        pool.run()
-        self.factor = pool.factor
+        factors = []
+        for name in self.factor.columns[2:]:
+            factor_df = self.factor[['date', 'code', name]]
+            pool = PoolFactor(factor_df, name)
+            pool.run()
+            factors.append(pool.factor)
+        self.factor = factors
 
         
     def _get_trading_days(self, start_date, end_date):
@@ -101,4 +110,10 @@ class BaseFactor(object):
             save_dir = os.path.dirname(self.save_path)  
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir) 
-            self.factor.to_pickle(self.save_path.format(self.factor_name))  
+            
+            if isinstance(self.factor, list):
+                for factor in self.factor:
+                    name = factor.columns[-1]
+                    factor.to_pickle(self.save_path.format(name))  
+            else:
+                self.factor.to_pickle(self.save_path.format(self.factor_name))

@@ -74,31 +74,21 @@ class Alpha(object):
         cls,
     ):
         open = read_daily(open=1, freq=cls.freq)
-        #close = read_daily(close=1, freq=cls.freq)
         zz500_open = read_market(open=1, index='000802', freq=cls.freq)
 
         cls.open = open.apply(pd.to_numeric, errors='coerce')
-        #cls.close = close.apply(pd.to_numeric, errors='coerce')
         zz500_open = zz500_open.apply(pd.to_numeric, errors='coerce')
-        #cls.index_open = zz500_open
         cls.market_ret = zz500_open / zz500_open.shift(1) - 1
         cls.open = cls.open.replace(0, np.nan)
-        #cls.close = cls.close.replace(0, np.nan)
 
     def set_factor_date_as_index(self, df: pd.DataFrame):
         """
         index为时间, columns为股票代码
         """
         if self.freq is not 'D':
-            #st = st.resample(self.freq).last()
-            #limit_status = limit_status.resample(self.freq).last()
-            #suspend = suspend.resample(self.freq).last()
             self.factors = df.resample(self.freq).last().dropna(how='all')
         else:
             self.factors = df.dropna(how='all')
-        #self.factors = (self.factors * suspend).dropna(how='all')
-        #self.factors = (self.factors * st).dropna(how='all')
-        #self.factors = (self.factors * limit_status).dropna(how='all')
         self.factor_cover = self.factors.count().sum()
         total = self.open.reindex(self.factors.index).count().sum()
         self.factor_cover = min(self.factor_cover / total, 1)
@@ -283,7 +273,7 @@ class Alpha(object):
         )
 
     def get_total_comments(self):
-
+        ####
         self.group_mean_rets = self.group_rets.drop(columns=['long_short']).mean()
         mar = self.market_ret.reindex(self.factors_out.index)
         self.group_mean_rets = (
@@ -335,127 +325,142 @@ class Alpha(object):
 
     def plot_net_values(self, ilegend=1, without_breakpoint=0):
 
-        tris = self.group_net_values.drop(columns=['long_short'])
+        plt.style.use('seaborn_v0_8-whitegrid')
+        fig, axes = plt.subplots(1, 3, figsize=(21, 7))
+        fig.suptitle('factor analysis', fontsize=16, y=0.98)
+
+        ax1 = axes[0]
+        tris = self.group_net_values.drop(columns=['long_short'], errors='ignore')
         if without_breakpoint:
-            tris = tris.dropna()
-        net_value_fig = go.Figure()
-        for col in tris.columns:
-            net_value_fig.add_trace(
-                go.Scatter(
-                    x=tris.index,
-                    y=tris[col],
-                    mode='lines',
-                    name=col,
-                )
-            )
-        comments = (
-            self.total_comments.applymap(lambda x: round(x, 4))
-            .reset_index()
-        )
-        here = pd.concat(
-            [
-                comments.iloc[1:7, :].reset_index(drop=True),
-                comments.iloc[[7,0,8,9,10,11], :].reset_index(drop=True),
-            ],
-            axis=1,
-        )
-        here.columns = ["绩效", "结果1", "多与空", "结果2"]
-        # here=here.to_numpy().tolist()+[['信息系数','结果','绩效指标','结果']]
-        table = go.Figure(data=[go.Table(
-            header = dict(values=list(here.columns)),
-            cells = dict(values=[here[col] for col in here.columns])
-        )])
-        
-        group_returns = go.Bar(
-            y = list(self.group_mean_rets),
-            x = [i.replace('roup', '') for i in list(self.group_mean_rets.index)],
-            name = '各组收益'
-        )
-        # table=go.Figure([go.Table(header=dict(values=list(here.columns)),cells=dict(values=here.to_numpy().tolist()))])
-        if self.group1_ret_yearly > self.group10_ret_yearly:
-            long_ic_bar = go.Bar(y=list(self.small_rankics.small_rankic), x=list(self.small_rankics.index),marker_color="red")
-    
-            long_ic_line = go.Scatter(
-                y=list(self.small_rankics.small_rankic.cumsum()),
-                x=list(self.small_rankics.index),
-                name="多头ic",
-                yaxis="y2",
-                mode="lines",
-                line=dict(color="blue"),
-            )
+            tris = tris.dropna(how='all', axis=0).dropna(how='all', axis=1)
+
+        if not tris.empty:
+            for col in tris.columns:
+                ax1.plot(tris.index, tris[col], label=col, linewidth=1.5)
+            ax1.set_title('Net Value Curves', fontsize=14)
+            ax1.set_xlabel('Date', fontsize=12)
+            ax1.set_ylabel('Net Value', fontsize=12)
+            if ilegend:
+                ax1.legend(loc='best', fontsize=10)
+            ax1.grid(True, linestyle='--', alpha=0.7)
+            fig.autofmt_xdate(ax=ax1)
         else:
-            long_ic_bar = go.Bar(y=list(self.big_rankics.big_rankic), x=list(self.big_rankics.index),marker_color="red")
+            ax1.text(0.5, 0.5, 'Insufficient Net Value Data', horizontalalign='center', verticalalignment='center', transform=ax1.transAxes)
+            ax1.set_title('Net Value Curves', fontsize=14)
+
+
+        ax2 = axes[1]
+        if hasattr(self, 'group_mean_rets') and not self.group_mean_rets.empty:
+            group_names = [name.replace('group', 'G') for name in self.group_mean_rets.index]
+            bars = ax2.bar(group_names, self.group_mean_rets.values, color='skyblue', edgecolor='black')
+            ax2.set_title('Group Annualized Excess Returns', fontsize=14)
+            ax2.set_xlabel('Group', fontsize=12)
+            ax2.set_ylabel('Annualized Excess Return', fontsize=12)
+            ax2.grid(True, axis='y', linestyle='--', alpha=0.7)
+            for bar in bars:
+                yval = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2, yval, f'{yval:.3f}', ha='bottom' if yval >= 0 else 'top', ha='center', fontsize=9)
+        else:
+            ax2.text(0.5, 0.5, 'Insufficient Group Return Data', horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes)
+            ax2.set_title('Group Annualized Excess Returns', fontsize=14)
+
+        ax3 = axes[2]
+        plot_rank_ic_data = False
+        if hasattr(self, 'group1_ret_yearly') and hasattr(self, 'group10_ret_yearly') and \
+           not pd.isna(self.group1_ret_yearly) and not pd.isna(self.group10_ret_yearly):
+            if self.group1_ret_yearly > self.group10_ret_yearly:
+                ic_bar_data = self.small_rankics.small_rankic if hasattr(self, 'small_rankics') else pd.Series(dtype=float)
+                bar_label_suffix = "多头 RankIC"
+                line_label_suffix = "累计多头 RankIC"
+            else:
+                ic_bar_data = self.big_rankics.big_rankic if hasattr(self, 'big_rankics') else pd.Series(dtype=float)
+                bar_label_suffix = "多头 RankIC"
+                line_label_suffix = "累计多头 RankIC"
             
-            long_ic_line = go.Scatter(
-                y=list(self.big_rankics.big_rankic.cumsum()),
-                x=list(self.big_rankics.index),
-                name="多头ic",
-                yaxis="y2",
-                mode="lines",
-                line=dict(color="blue"),
-            )
-        all_ic_line = go.Scatter(
-            y=list(self.rankics.rankic.cumsum()),
-            x=list(self.rankics.index),
-            mode="lines",
-            name="rankic",
-            yaxis="y2",
-            line=dict(color="red"),
-        )
+            if not ic_bar_data.empty and not ic_bar_data.isna().all():
+                plot_rank_ic_data = True
+                ax3.bar(ic_bar_data.index, ic_bar_data, color='lightcoral', alpha=0.7, label=bar_label_suffix)
+                ax3.set_xlabel('Date', fontsize=12)
+                ax3.set_ylabel('RankIC', color='lightcoral', fontsize=12)
+                ax3.tick_params(axis='y', labelcolor='lightcoral')
+                
+                ax3_twin = ax3.twinx()
+                ax3_twin.plot(ic_bar_data.index, ic_bar_data.cumsum(), color='mediumblue', linestyle='--', linewidth=1.5, label=line_label_suffix)
+                
+                if hasattr(self, 'rankics') and not self.rankics.rankic.empty and not self.rankics.rankic.isna().all():
+                    ax3_twin.plot(self.rankics.index, self.rankics.rankic.cumsum(), color='darkgreen', linestyle='-', linewidth=1.5, label='Cumulative Total RankIC')
+                
+                ax3_twin.set_ylabel('Cumulative RankIC', color='mediumblue', fontsize=12)
+                ax3_twin.tick_params(axis='y', labelcolor='mediumblue')
+                ax3_twin.grid(True, axis='y', linestyle=':', alpha=0.5)
 
-        fig = make_subplots(
-            rows=3, cols=9,
-            specs = [
-                [{'rowspan': 3, 'colspan': 3}, None, None,
-                 {'rowspan': 3, 'colspan': 3}, None, None,
-                 {'rowspan': 3, 'colspan': 3}, None, None
-                ],
-                 [None] * 9,
-                 [None] * 9
-            ],
-            subplot_titles = ['净值曲线', '各组超均收益', 'RankIC 时序图'],
-            vertical_spacing = 0.15,
-            horizontal_spacing = 0.045
-        )
-
-        for trace in net_value_fig.data:
-            fig.add_trace(trace, row=1, col=1)
+                if ilegend:
+                    lines, labels = ax3.get_legend_handles_labels()
+                    lines2, labels2 = ax3_twin.get_legend_handles_labels()
+                    ax3.legend(lines + lines2, labels + labels2, loc='best', fontsize=10)
+            
+        if not plot_rank_ic_data:
+            ax3.text(0.5, 0.5, "RankIC 数据不足 (Insufficient RankIC Data)", 
+                     horizontalalignment='center', verticalalignment='center', transform=ax3.transAxes)
         
-        #fig.add_trace(table, row=1, col=4)
-        fig.add_trace(group_returns, row=1, col=4)
-        fig.add_trace(long_ic_bar, row=1, col=7)
-        fig.add_trace(long_ic_line.update(yaxis='y2'), row=1, col=7)
-        fig.add_trace(all_ic_line, row=1, col=7)
+        ax3.set_title('RankIC Time Series', fontsize=14)
+        if plot_rank_ic_data: fig.autofmt_xdate(ax=ax3)
 
 
-        fig.update_layout(
-            {
-                'yaxis2':{
-                    'title':'累计IC',
-                    'overlaying':'y',
-                    'side':'right',
-                    'anchor': 'x3'
-                }
-            }
-        )
-        table.update_layout(width=800, height=400)
-        table.show()
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) 
+        plt.show()
 
-        fig.update_layout(
-            showlegend=ilegend,
-            width=1400,
-            height=600,
-            margin=dict(l=0, r=0, t=30, pad=0),
-            font=dict(size=12),
-            legend=dict(
-                yanchor='top',
-                y=0.99,
-                xanchor='right',
-                x=0.99,
-            )
-        )
 
-        fig.show()
+        comments = self.total_comments.applymap(lambda x: round(x, 4) if isinstance(x, (int, float)) else x).reset_index()
+
+        idx_1_to_7 = [i for i in range(1,7) if i < len(comments)]
+        idx_others = [i for i in [7,0,8,9,10,11] if i < len(comments)]
+
+        part1 = comments.iloc[idx_1_to_7, :].reset_index(drop=True) if idx_1_to_7 else pd.DataFrame(columns=comments.columns)
+        part2 = comments.iloc[idx_others, :].reset_index(drop=True) if idx_others else pd.DataFrame(columns=comments.columns)
+        
+        max_rows = max(len(part1), len(part2))
+        if len(part1) < max_rows:
+            padding = pd.DataFrame(index=range(max_rows - len(part1)), columns=part1.columns)
+            part1 = pd.concat([part1, padding]).reset_index(drop=True)
+        if len(part2) < max_rows:
+            padding = pd.DataFrame(index=range(max_rows - len(part2)), columns=part2.columns)
+            part2 = pd.concat([part2, padding]).reset_index(drop=True)
+
+        here = pd.concat([part1, part2], axis=1)
+        here.columns = ["绩效指标", "结果", "其他指标", "结果 "] 
+
+        fig_table, ax_table = plt.subplots(figsize=(8, 3.5)) 
+        ax_table.axis('tight')
+        ax_table.axis('off')
+        
+        if not here.empty:
+            table_obj = ax_table.table(cellText=here.values, 
+                                     colLabels=here.columns, 
+                                     loc='center', 
+                                     cellLoc='center',
+                                     colWidths=[0.25, 0.15, 0.25, 0.15]) 
+
+            table_obj.auto_set_font_size(False)
+            table_obj.set_fontsize(10)
+            table_obj.scale(1.1, 1.1)
+
+            
+            for (i, j), cell in table_obj.get_celld().items():
+                if i == 0: 
+                    cell.set_text_props(weight='bold', color='white')
+                    cell.set_facecolor('royalblue')
+                cell.set_edgecolor('gray') 
+            
+            fig_table.suptitle("绩效指标汇总 (Performance Metrics Summary)", fontsize=14)
+        else:
+            ax_table.text(0.5,0.5, "指标数据不足 (Insufficient Metrics Data)",
+                          horizontalalignment='center', verticalalignment='center', transform=ax_table.transAxes)
+            fig_table.suptitle("绩效指标汇总 (Performance Metrics Summary)", fontsize=14)
+
+        plt.show()
+
+
 
 
         

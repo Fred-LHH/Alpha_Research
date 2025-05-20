@@ -77,6 +77,7 @@ class PoolFactor:
         self.remove_st()
         self.remove_suspend()
         self.remove_limit()
+        self.factor.rename(columns={self.factor.columns[-1]: self.name}, inplace=True)
         if is_smooth:
             self.smooth_factor()
         

@@ -12,10 +12,103 @@ import datetime
 import scipy.stats as ss
 import tqdm.auto
 import joblib
+import re
 
 from pandarallel import pandarallel
 pandarallel.initialize(progress_bar=False, nb_workers=10)
 
+def convert_freq(data,
+                 freq,
+                 method='sum'):
+    '''
+    对日内股票分钟数据进行重采样
+    Args:
+    ----------
+    data: array
+        日内股票分钟数据
+    freq: str
+        重采样频率, 如'5T'表示5分钟
+    method: str
+        重采样方法, 'sum'或'mean'
+    '''
+    min = re.match(r'^(\d+)T$', freq)
+    if not min or int(min.group(1)) < 1:
+        raise ValueError(f"Invalid freq format: {freq}, should be like '5T'")
+    k = int(min.group(1))
+
+    data = np.asarray(data)
+    if len(data) < k:
+        return np.array([np.nan])
+    
+    n = len(data)
+    m, remainder = divmod(n, k)
+
+    resampled = []
+    if m > 0:
+        main = data[:m*k].reshape(m, k)
+        resampled.append(main.sum(1) if method == 'sum' else main.mean(1))
+    
+    # 处理尾部
+    if remainder > 0:
+        tail = data[m*k:]
+        tail_value = tail.sum() if method == 'sum' else tail.mean()
+        resampled.append(np.array([tail_value]))  
+
+    return np.concatenate(resampled) if resampled else np.array([])
+    
+
+def symmetrically_orthogonalize(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """对多个因子做对称正交，每个因子得到正交其他因子后的结果
+
+    Args:
+    ----------
+    dfs : list[pd.DataFrame]
+        多个要做正交的因子, 每个df都是index为时间, columns为股票代码, values为因子值的df
+
+    Returns
+    -------
+    list[pd.DataFrame]
+        对称正交后的各个因子
+    """
+
+    def sing(dfs: list[pd.DataFrame], date: pd.Timestamp):
+        dds = []
+        for num, i in enumerate(dfs):
+            i = i[i.index == date]
+            i.index = [f"fac{num}"]
+            i = i.T
+            dds.append(i)
+        dds = pd.concat(dds, axis=1)
+        cov = dds.cov()
+        d, u = np.linalg.eig(cov)
+        d = np.diag(d ** (-0.5))
+        new_facs = pd.DataFrame(
+            np.dot(dds, np.dot(np.dot(u, d), u.T)), columns=dds.columns, index=dds.index
+        )
+        new_facs = new_facs.stack().reset_index()
+        new_facs.columns = ["code", "fac_number", "fac"]
+        new_facs = new_facs.assign(date=date)
+        dds = []
+        for num, i in enumerate(dfs):
+            i = new_facs[new_facs.fac_number == f"fac{num}"]
+            i = i.pivot(index="date", columns="code", values="fac")
+            dds.append(i)
+        return dds
+
+    dfs = [standardlize(i) for i in dfs]
+    date_first = max([i.index.min() for i in dfs])
+    date_last = min([i.index.max() for i in dfs])
+    dfs = [i[(i.index >= date_first) & (i.index <= date_last)] for i in dfs]
+    fac_num = len(dfs)
+    ddss = [[] for i in range(fac_num)]
+    for date in tqdm.auto.tqdm(dfs[0].index):
+        dds = sing(dfs, date)
+        for num, i in enumerate(dds):
+            ddss[num].append(i)
+    ds = []
+    for i in tqdm.auto.tqdm(ddss):
+        ds.append(pd.concat(i))
+    return ds
 
 
 @do_on_dfs

@@ -4,19 +4,22 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-plt.rcParams['axes.unicode_minus'] = False 
-plt.rcParams['font.sans-serif'] = ['SimHei'] 
+plt.rcParams['axes.unicode_minus'] = False
 
 from functools import reduce, lru_cache
 from loguru import logger
 
-from Data.get_data import read_daily, read_market 
-from decorators import do_on_dfs 
-from Data.utils import * 
-from config import * 
-from utils import * 
+from Data.get_data import read_daily, read_market
+from decorators import do_on_dfs
+from Data.utils import *
+from config import *
+from utils import *
+from matplotlib import rcParams
 
-db = DButils() 
+rcParams['font.sans-serif'] = ['SimHei']  
+rcParams['axes.unicode_minus'] = False  
+
+db = DButils()
 
 class frequency_controller(object):
     def __init__(self, freq: str):
@@ -53,7 +56,7 @@ class Alpha(object):
     @lru_cache(maxsize=None)
     def __init__(
         cls,
-        freq: str='W',
+        freq: str='D',
     ):
         cls.freq = freq
         cls.freq_controller = frequency_controller(freq)
@@ -87,15 +90,14 @@ class Alpha(object):
             self.factors = df.resample(self.freq).last().dropna(how='all')
         else:
             self.factors = df.dropna(how='all')
-
         self.factor_cover = self.factors.count().sum()
         total = self.open.reindex(self.factors.index).count().sum()
-        self.factor_cover = min(self.factor_cover / total, 1) if total > 0 else 0
+        self.factor_cover = min(self.factor_cover / total, 1)
         self.factor_cross_skew = self.factors.skew(axis=1).mean()
         pos_num = ((self.factors > 0) + 0).sum().sum()
         neg_num = ((self.factors < 0) + 0).sum().sum()
-        self.pos_neg_rate = pos_num / (pos_num + neg_num) if (pos_num + neg_num) > 0 else 0
-        self.corr_itself = show_corr(self.factors, self.factors.shift(1), plt_plot=0) 
+        self.pos_neg_rate = pos_num / (pos_num + neg_num)
+        self.corr_itself = show_corr(self.factors, self.factors.shift(1), plt_plot=0)
 
     @classmethod
     @lru_cache(maxsize=None)
@@ -127,7 +129,7 @@ class Alpha(object):
         small_rankic = df.small_rankic.mean()
         big_rankic = df.big_rankic.mean()
         
-        return pd.DataFrame({'IC': [rankic]}, index=['评价指标']), pd.DataFrame({'1-5IC': [small_rankic], '6-10IC': [big_rankic]}, index=['评价指标']).T
+        return pd.DataFrame({'IC': [rankic]}, index=['Performance']), pd.DataFrame({'1-5IC': [small_rankic], '6-10IC': [big_rankic]}, index=['Performance']).T
 
 
     def get_ic_icir_and_rank(cls, df):
@@ -149,9 +151,7 @@ class Alpha(object):
         if 'group' in list(df.columns):
             df = df.drop(columns=['group'])
         df = df.sort_values(['fac'], ascending=True)
-        
         each_group = round(df.shape[0] / groups_num)
-
         l = list(
             map(
                 lambda x, y: [x] * y,
@@ -172,12 +172,10 @@ class Alpha(object):
         """
         self.data = pd.merge(self.rets, self.factors, how='inner', on=['date', 'code'])
         self.ic_icir_and_rank, self.big_small_rankic = self.get_ic_icir_and_rank(self.data)
-
         self.data = self.data.groupby('date').apply(
             lambda x: self.get_groups(x, groups_num)
         )
         self.data = self.data.reset_index(drop=True)
-
 
     def make_start_to_one(self, l):
         """
@@ -248,214 +246,152 @@ class Alpha(object):
         """
         计算多空对冲的回测指标
         """
-        if self.long_short_net_values.empty or len(self.long_short_net_values) == 0 or pd.isna(self.long_short_net_values.iloc[-1]):
-            self.long_short_ret_yearly = np.nan
-            self.long_short_vol_yearly = np.nan
-            self.long_short_info_ratio = np.nan
-        else:
-            self.long_short_ret_yearly = self.long_short_net_values.iloc[-1] * (
-                self.freq_controller.counts_one_year / len(self.long_short_net_values) if len(self.long_short_net_values) > 0 else np.nan
-            )
-            self.long_short_vol_yearly = np.std(self.long_short_rets) * (
-                self.freq_controller.counts_one_year ** 0.5
-            )
-            self.long_short_info_ratio = (
-                self.long_short_ret_yearly / self.long_short_vol_yearly if self.long_short_vol_yearly != 0 else np.nan
-            )
-        
-        # Similar checks for inner_long and inner_short
-        if self.inner_long_net_values.empty or len(self.inner_long_net_values) == 0 or pd.isna(self.inner_long_net_values.iloc[-1]):
-            self.inner_long_ret_yearly = np.nan
-        else:
-            self.inner_long_ret_yearly = self.inner_long_net_values.iloc[-1] * (
-                self.freq_controller.counts_one_year / len(self.inner_long_net_values) if len(self.inner_long_net_values) > 0 else np.nan
-            )
+        self.long_short_ret_yearly = self.long_short_net_values[-1] * (
+            self.freq_controller.counts_one_year / len(self.long_short_net_values)
+        )
+        self.inner_long_ret_yearly = self.inner_long_net_values[-1] * (
+            self.freq_controller.counts_one_year / len(self.inner_long_net_values)
+        )
+        self.inner_short_ret_yearly = self.inner_short_net_values[-1] * (
+            self.freq_controller.counts_one_year / len(self.inner_short_net_values)
+        )
 
-        if self.inner_short_net_values.empty or len(self.inner_short_net_values) == 0 or pd.isna(self.inner_short_net_values.iloc[-1]):
-            self.inner_short_ret_yearly = np.nan
-        else:
-            self.inner_short_ret_yearly = self.inner_short_net_values.iloc[-1] * (
-                self.freq_controller.counts_one_year / len(self.inner_short_net_values) if len(self.inner_short_net_values) > 0 else np.nan
-            )
-
+        self.long_short_vol_yearly = np.std(self.long_short_rets) * (
+            self.freq_controller.counts_one_year ** 0.5
+        )
+        self.long_short_info_ratio = (
+            self.long_short_ret_yearly / self.long_short_vol_yearly
+        )
         self.long_short_comments = pd.DataFrame(
             {
-                '评价指标': [
+                'Performance': [
                     self.long_short_ret_yearly,
                     self.long_short_vol_yearly,
                     self.long_short_info_ratio,
                 ]
             },
-            index=['年化收益', '年化波动', '信息比率'],
+            index=['Annual Ret', 'Annual Vol', 'IR'],
         )
 
     def get_total_comments(self):
-        group1_ret_yearly_val = np.nan
-        group10_ret_yearly_val = np.nan
-
-        if not self.group_rets.empty and 'long_short' in self.group_rets.columns:
-            group_rets_to_mean = self.group_rets.drop(columns=['long_short'])
-            if not group_rets_to_mean.empty:
-                self.group_mean_rets = group_rets_to_mean.mean()
-                
-                # Align market returns with factor dates for mean calculation
-                # Assuming self.factors_out is the original factor DataFrame with DateTimeIndex
-                if hasattr(self, 'factors_out') and self.factors_out is not None and not self.factors_out.empty:
-                    mar_idx = self.market_ret.reindex(self.factors_out.index)
-                    mar_mean = mar_idx.mean() # This is a scalar if market_ret is a Series
-                else: # Fallback if factors_out is not available
-                    mar_mean = self.market_ret.mean()
-
-                self.group_mean_rets = (self.group_mean_rets - mar_mean) * self.freq_controller.counts_one_year
-                
-                if 'group1' in self.group_mean_rets:
-                    group1_ret_yearly_val = self.group_mean_rets.loc['group1']
-                if 'group10' in self.group_mean_rets: # Assuming 10 groups
-                    group10_ret_yearly_val = self.group_mean_rets.loc['group10']
-            else:
-                self.group_mean_rets = pd.Series(dtype=float) # Empty series
+        ####
+        self.group_mean_rets = self.group_rets.drop(columns=['long_short']).mean()
+        mar = self.market_ret.reindex(self.factors_out.index)
+        self.group_mean_rets = (
+            self.group_mean_rets - mar.mean().values
+        ) * self.freq_controller.counts_one_year
+        self.group1_ret_yearly = self.group_mean_rets.loc['group1']
+        self.group10_ret_yearly = self.group_mean_rets.loc['group10']
+        if self.group1_ret_yearly > self.group10_ret_yearly:
+            self.longside_ret = self.group_rets.group1  #- mar.values
+            self.index_ret = mar
         else:
-            self.group_mean_rets = pd.Series(dtype=float) # Empty series
-        
-        self.group1_ret_yearly = group1_ret_yearly_val
-        self.group10_ret_yearly = group10_ret_yearly_val
-
-        # Default to empty series if conditions are not met
-        self.longside_ret = pd.Series(dtype=float)
-        self.index_ret = pd.Series(dtype=float)
-
-        if not pd.isna(self.group1_ret_yearly) and not pd.isna(self.group10_ret_yearly) and \
-           'group1' in self.group_rets and 'group10' in self.group_rets: # Check if keys exist
-            mar = self.market_ret.reindex(self.factors_out.index) # Align with factors_out
-            if self.group1_ret_yearly > self.group10_ret_yearly:
-                self.longside_ret = self.group_rets.group1
-            else:
-                self.longside_ret = self.group_rets.group10
-            self.index_ret = mar # mar is already a Series
-        
-        if not self.longside_ret.empty:
-             # Resample requires a DateTimeIndex
-            if isinstance(self.longside_ret.index, pd.DatetimeIndex):
-                self.longside_ret_eachyear = self.longside_ret.resample('Y').mean() * self.freq_controller.counts_one_year
-            else:
-                logger.warning("longside_ret does not have a DatetimeIndex. Cannot resample.")
-                self.longside_ret_eachyear = pd.Series(dtype=float) # Empty series
-        else:
-            self.longside_ret_eachyear = pd.Series(dtype=float)
-
+            self.longside_ret = self.group_rets.group10 #- mar.values
+            self.index_ret = mar
+        self.longside_ret_eachyear = self.longside_ret.resample('Y').mean() * self.freq_controller.counts_one_year
 
         self.total_comments = pd.concat(
             [
                 self.ic_icir_and_rank,
                 self.long_short_comments,
+
                 pd.DataFrame(
                     {
-                        '评价指标': [
-                            self.pos_neg_rate if hasattr(self, 'pos_neg_rate') else np.nan,
-                            self.factor_cross_skew if hasattr(self, 'factor_cross_skew') else np.nan,
-                            self.corr_itself if hasattr(self, 'corr_itself') else np.nan,
-                            self.factor_cover if hasattr(self, 'factor_cover') else np.nan,
+                        'Performance': [
+                            self.pos_neg_rate,
+                            self.factor_cross_skew,
+                            self.corr_itself,
+                            self.factor_cover,
                         ]
                     },
                     index=[
-                        '正值占比',
-                        '因子截面偏度',
-                        '自相关系数',
-                        '因子覆盖率',
+                        'Positive Ratio',
+                        'Factor Skewness',
+                        'Autocorrelation Coefficient',
+                        'Factor Coverage',
                     ],
                 ),
                 self.big_small_rankic,
                 pd.DataFrame(
                     {
-                        '评价指标': [
+                        'Performance': [
                             self.group1_ret_yearly,
                             self.group10_ret_yearly,
                         ]
                     },
-                    index=['1组收益', '10组收益'],
+                    index=['G1 ret', 'G10 ret'],
                 )
             ]
         )
-    
-    def plot_net_values(self, ilegend=True, without_breakpoint=0):
-        plt.style.use('seaborn-v0_8-whitegrid') # Using a seaborn style for better aesthetics
 
-        # --- Main 3-plot figure ---
-        fig, axes = plt.subplots(1, 3, figsize=(21, 7)) # Adjusted for potentially wider labels
-        fig.suptitle("因子分析报告", fontsize=16, y=0.98) # y=1 typically touches top, y=0.98 gives some space
+    def plot_net_values(self, ilegend=1, without_breakpoint=0):
 
-        # Plot 1: Net Value Curves
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, axes = plt.subplots(1, 3, figsize=(21, 7))
+        fig.suptitle('factor analysis', fontsize=16, y=0.98)
+
         ax1 = axes[0]
         tris = self.group_net_values.drop(columns=['long_short'], errors='ignore')
         if without_breakpoint:
-            tris = tris.dropna(how='all', axis=0).dropna(how='all', axis=1) # Drop rows/cols that are all NaN
-        
+            tris = tris.dropna(how='all', axis=0).dropna(how='all', axis=1)
+
         if not tris.empty:
             for col in tris.columns:
-                # Add 1 to cumulative returns to represent net value starting from 1
-                ax1.plot(tris.index, tris[col] + 1, label=col, linewidth=1.5)
-            ax1.set_title('净值曲线 (Net Value Curves)', fontsize=14)
-            ax1.set_xlabel('日期 (Date)', fontsize=12)
-            ax1.set_ylabel('净值 (Net Value)', fontsize=12)
+                ax1.plot(tris.index, tris[col], label=col, linewidth=1.5)
+            ax1.set_title('Net Value Curves', fontsize=14)
+            ax1.set_xlabel('Date', fontsize=12)
+            ax1.set_ylabel('Net Value', fontsize=12)
             if ilegend:
                 ax1.legend(loc='best', fontsize=10)
             ax1.grid(True, linestyle='--', alpha=0.7)
-            fig.autofmt_xdate(ax=ax1) # Rotate date labels if they overlap
+            fig.autofmt_xdate()
         else:
-            ax1.text(0.5, 0.5, "净值数据不足 (Insufficient Net Value Data)", 
-                     horizontalalignment='center', verticalalignment='center', transform=ax1.transAxes)
-            ax1.set_title('净值曲线 (Net Value Curves)', fontsize=14)
+            ax1.text(0.5, 0.5, 'Insufficient Net Value Data', horizontalalign='center', verticalalignment='center', transform=ax1.transAxes)
+            ax1.set_title('Net Value Curves', fontsize=14)
 
 
-        # Plot 2: Group Returns Bar Chart
         ax2 = axes[1]
         if hasattr(self, 'group_mean_rets') and not self.group_mean_rets.empty:
             group_names = [name.replace('group', 'G') for name in self.group_mean_rets.index]
             bars = ax2.bar(group_names, self.group_mean_rets.values, color='skyblue', edgecolor='black')
-            ax2.set_title('各组年化超额收益 (Group Annualized Excess Returns)', fontsize=14)
-            ax2.set_xlabel('分组 (Group)', fontsize=12)
-            ax2.set_ylabel('年化超额收益 (Annualized Excess Return)', fontsize=12)
+            ax2.set_title('Group Annualized Excess Returns', fontsize=14)
+            ax2.set_xlabel('Group', fontsize=12)
+            ax2.set_ylabel('Annualized Excess Return', fontsize=12)
             ax2.grid(True, axis='y', linestyle='--', alpha=0.7)
-            # Add text labels on bars
             for bar in bars:
                 yval = bar.get_height()
-                ax2.text(bar.get_x() + bar.get_width()/2.0, yval, f'{yval:.3f}', 
-                         va='bottom' if yval >=0 else 'top', ha='center', fontsize=9)
+                ax2.text(bar.get_x() + bar.get_width()/2, yval, f'{yval:.3f}', va='bottom' if yval >= 0 else 'top', fontsize=9)
         else:
-            ax2.text(0.5, 0.5, "分组收益数据不足 (Insufficient Group Return Data)", 
-                     horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes)
-            ax2.set_title('各组年化超额收益 (Group Annualized Excess Returns)', fontsize=14)
+            ax2.text(0.5, 0.5, 'Insufficient Group Return Data', horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes)
+            ax2.set_title('Group Annualized Excess Returns', fontsize=14)
 
-        # Plot 3: RankIC Time Series
         ax3 = axes[2]
         plot_rank_ic_data = False
         if hasattr(self, 'group1_ret_yearly') and hasattr(self, 'group10_ret_yearly') and \
            not pd.isna(self.group1_ret_yearly) and not pd.isna(self.group10_ret_yearly):
             if self.group1_ret_yearly > self.group10_ret_yearly:
                 ic_bar_data = self.small_rankics.small_rankic if hasattr(self, 'small_rankics') else pd.Series(dtype=float)
-                bar_label_suffix = " (多头 RankIC - 小市值组)"
-                line_label_suffix = " (累计多头 RankIC - 小市值组)"
+                bar_label_suffix = "Long RankIC"
+                line_label_suffix = "CumLong RankIC"
             else:
                 ic_bar_data = self.big_rankics.big_rankic if hasattr(self, 'big_rankics') else pd.Series(dtype=float)
-                bar_label_suffix = " (多头 RankIC - 大市值组)"
-                line_label_suffix = " (累计多头 RankIC - 大市值组)"
+                bar_label_suffix = "Long RankIC"
+                line_label_suffix = "CumLong RankIC"
             
             if not ic_bar_data.empty and not ic_bar_data.isna().all():
                 plot_rank_ic_data = True
-                # Bar for RankIC values
                 ax3.bar(ic_bar_data.index, ic_bar_data, color='lightcoral', alpha=0.7, label=bar_label_suffix)
-                ax3.set_xlabel('日期 (Date)', fontsize=12)
-                ax3.set_ylabel('RankIC 值', color='lightcoral', fontsize=12)
+                ax3.set_xlabel('Date', fontsize=12)
+                ax3.set_ylabel('RankIC', color='lightcoral', fontsize=12)
                 ax3.tick_params(axis='y', labelcolor='lightcoral')
                 
-                # Line for cumulative RankIC (twin axis)
                 ax3_twin = ax3.twinx()
                 ax3_twin.plot(ic_bar_data.index, ic_bar_data.cumsum(), color='mediumblue', linestyle='--', linewidth=1.5, label=line_label_suffix)
                 
                 if hasattr(self, 'rankics') and not self.rankics.rankic.empty and not self.rankics.rankic.isna().all():
-                    ax3_twin.plot(self.rankics.index, self.rankics.rankic.cumsum(), color='darkgreen', linestyle='-', linewidth=1.5, label='累计总 RankIC (Cumulative Total RankIC)')
+                    ax3_twin.plot(self.rankics.index, self.rankics.rankic.cumsum(), color='darkgreen', linestyle='-', linewidth=1.5, label='Cumulative Total RankIC')
                 
-                ax3_twin.set_ylabel('累计 RankIC (Cumulative RankIC)', color='mediumblue', fontsize=12)
+                ax3_twin.set_ylabel('Cumulative RankIC', color='mediumblue', fontsize=12)
                 ax3_twin.tick_params(axis='y', labelcolor='mediumblue')
                 ax3_twin.grid(True, axis='y', linestyle=':', alpha=0.5)
 
@@ -465,28 +401,25 @@ class Alpha(object):
                     ax3.legend(lines + lines2, labels + labels2, loc='best', fontsize=10)
             
         if not plot_rank_ic_data:
-            ax3.text(0.5, 0.5, "RankIC 数据不足 (Insufficient RankIC Data)", 
+            ax3.text(0.5, 0.5, "Insufficient RankIC Data", 
                      horizontalalignment='center', verticalalignment='center', transform=ax3.transAxes)
         
-        ax3.set_title('RankIC 时序图 (RankIC Time Series)', fontsize=14)
-        if plot_rank_ic_data: fig.autofmt_xdate(ax=ax3)
+        ax3.set_title('RankIC Time Series', fontsize=14)
+        if plot_rank_ic_data: fig.autofmt_xdate()
 
 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to prevent overlap, make space for suptitle
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) 
         plt.show()
 
 
-        # --- Table Figure ---
-        # Prepare data for the table
         comments = self.total_comments.applymap(lambda x: round(x, 4) if isinstance(x, (int, float)) else x).reset_index()
-        # Ensure correct selection even if some comments are missing
+
         idx_1_to_7 = [i for i in range(1,7) if i < len(comments)]
         idx_others = [i for i in [7,0,8,9,10,11] if i < len(comments)]
 
         part1 = comments.iloc[idx_1_to_7, :].reset_index(drop=True) if idx_1_to_7 else pd.DataFrame(columns=comments.columns)
         part2 = comments.iloc[idx_others, :].reset_index(drop=True) if idx_others else pd.DataFrame(columns=comments.columns)
         
-        # Ensure both parts have the same number of rows by padding with NaN DataFrames
         max_rows = max(len(part1), len(part2))
         if len(part1) < max_rows:
             padding = pd.DataFrame(index=range(max_rows - len(part1)), columns=part1.columns)
@@ -496,9 +429,9 @@ class Alpha(object):
             part2 = pd.concat([part2, padding]).reset_index(drop=True)
 
         here = pd.concat([part1, part2], axis=1)
-        here.columns = ["绩效指标", "结果", "其他指标", "结果 "] # Ensure unique column names for table
+        here.columns = ["Performance1", "res1", "Performance2", "res2 "] 
 
-        fig_table, ax_table = plt.subplots(figsize=(8, 3.5)) # Adjust size as needed
+        fig_table, ax_table = plt.subplots(figsize=(8, 3.5)) 
         ax_table.axis('tight')
         ax_table.axis('off')
         
@@ -507,27 +440,31 @@ class Alpha(object):
                                      colLabels=here.columns, 
                                      loc='center', 
                                      cellLoc='center',
-                                     colWidths=[0.25, 0.15, 0.25, 0.15]) # Adjust colWidths
+                                     colWidths=[0.25, 0.15, 0.25, 0.15]) 
 
             table_obj.auto_set_font_size(False)
             table_obj.set_fontsize(10)
             table_obj.scale(1.1, 1.1)
 
-            # Style header
+            
             for (i, j), cell in table_obj.get_celld().items():
-                if i == 0: # Header row
+                if i == 0: 
                     cell.set_text_props(weight='bold', color='white')
                     cell.set_facecolor('royalblue')
-                cell.set_edgecolor('gray') # Add cell borders for clarity
+                cell.set_edgecolor('gray') 
             
-            fig_table.suptitle("绩效指标汇总 (Performance Metrics Summary)", fontsize=14)
+            fig_table.suptitle("Performance Metrics Summary", fontsize=14)
         else:
-            ax_table.text(0.5,0.5, "指标数据不足 (Insufficient Metrics Data)",
+            ax_table.text(0.5,0.5, "Insufficient Metrics Data",
                           horizontalalignment='center', verticalalignment='center', transform=ax_table.transAxes)
-            fig_table.suptitle("绩效指标汇总 (Performance Metrics Summary)", fontsize=14)
+            fig_table.suptitle("Performance Metrics Summary", fontsize=14)
 
         plt.show()
 
+
+
+
+        
 
     @classmethod
     @lru_cache(maxsize=None)
@@ -538,38 +475,28 @@ class Alpha(object):
     def run(
         self,
         groups_num=10,
-        ilegend=True, # Changed default to True for matplotlib as legends are often more crucial
+        ilegend=1,
         without_breakpoint=0,
         show_more_than=0.025,
     ):
         """运行回测部分"""
-        self.__factors_out = self.factors.copy() # factors is DataFrame: index=time, columns=stocks
-        self.factors = self.factors.shift(1) # Shift for predictiveness
-        self.factors = self.factors.stack(dropna=False).reset_index() # stack with dropna=False to keep all dates
+        self.__factors_out = self.factors.copy()
+        self.factors = self.factors.shift(1)
+        self.factors = self.factors.stack().reset_index()
         self.factors.columns = ["date", "code", "fac"]
-        self.factors = self.factors.dropna(subset=['fac']) # Now drop rows where factor is NaN
-
         self.get_data(groups_num)
         self.get_group_rets_net_values(groups_num=groups_num)
         self.get_long_short_backtest()
         self.get_total_comments()
-        
-        # Check if necessary attributes for plotting are valid
-        # self.group1_ret_yearly might be nan
-        g1_ret = self.group1_ret_yearly if hasattr(self, 'group1_ret_yearly') and not pd.isna(self.group1_ret_yearly) else -np.inf
-        g10_ret = self.group10_ret_yearly if hasattr(self, 'group10_ret_yearly') and not pd.isna(self.group10_ret_yearly) else -np.inf
-        
-        max_group_ret = max(g1_ret, g10_ret)
-        current_ic = self.rankics.rankic.mean() if hasattr(self, 'rankics') and not self.rankics.empty else np.nan
 
-
-        if (show_more_than is None) or (max_group_ret > show_more_than and not pd.isna(max_group_ret)):
+        if (show_more_than is None) or (show_more_than < max(self.group1_ret_yearly,self.group10_ret_yearly)):
             self.plot_net_values(
                 ilegend=bool(ilegend),
                 without_breakpoint=without_breakpoint,
             )
         else:
-            logger.info(f'多头收益率为{round(max_group_ret,3) if not pd.isna(max_group_ret) else "N/A"}, ic为{round(current_ic,3) if not pd.isna(current_ic) else "N/A"}，表现太差或数据不足，不展示详细图表。')
+            logger.info(f'多头收益率为{round(max(self.group1_ret_yearly,self.group10_ret_yearly),3)}, ic为{round(self.rankics.rankic.mean(),3)}，表现太差，不展示了')
+            # plt.show()
 
 
 
@@ -582,29 +509,55 @@ class pure_Alpha(object):
         factors: pd.DataFrame,
         groups_num: int = 10,
         freq: str = "W",
-        time_start: str = None, # Assuming DATE1, DATE2 were placeholders for None or specific dates
-        time_end: str = None,   # Assuming DATE1, DATE2 were placeholders for None or specific dates
-        ilegend: bool = True, # Changed default to True
+        time_start: str = DATE1,
+        time_end: str = DATE2,
+        ilegend: bool = 1,
         without_breakpoint: bool = 0,
         show_more_than: float = 0.025,
     ) -> None:
+        """一键回测框架，测试单因子的月频调仓的分组表现
+        每月月底计算因子值，月初第一天开盘时买入，月末收盘最后一天收盘时卖出
+        剔除上市不足60天的, 停牌天数超过一半的, st天数超过一半的
+        月末收盘跌停的不卖出，月初开盘涨停的不买入
+        由最好组和最差组的多空组合构成多空对冲组
+
+        Parameters
+        ----------
+        factors : pd.DataFrame
+            要用于检测的因子值, index是时间, columns是股票代码
+        groups_num : int, optional
+            分组数量, by default 10
+        freq : str, optional
+            回测频率, by default 'M'
+        time_start : int, optional
+            回测起始时间, by default None
+        time_end : int, optional
+            回测终止时间, by default None
+        ilegend : bool, optional
+            使用cufflinks绘图时, 是否显示图例, by default 1
+        without_breakpoint : bool, optional
+            画图的时候是否去除间断点, by default 0
+        show_more_than : float, optional
+            展示收益率大于多少的因子, 默认展示大于0.025的因子, by default 0.025
+        """
         if time_start is not None:
             factors = factors[factors.index >= pd.Timestamp(str(time_start))]
         if time_end is not None:
             factors = factors[factors.index <= pd.Timestamp(str(time_end))]
-        
-        # Ensure factors is not empty after time slicing
-        if factors.empty:
-            logger.error("Factor data is empty after time slicing. Aborting pure_Alpha execution.")
-            return
-
         self.shen = Alpha(freq=freq)
-        self.shen.set_basic_data() # This is a classmethod, sets data on Alpha class
-        self.shen.set_factor_date_as_index(factors) # This is an instance method, sets on self.shen
-        self.shen.prepare() # This is a classmethod
+        self.shen.set_basic_data()
+        self.shen.set_factor_date_as_index(factors)
+        self.shen.prepare()
         self.shen.run(
             groups_num=groups_num,
             ilegend=ilegend,
             without_breakpoint=without_breakpoint,
             show_more_than=show_more_than,
         )
+
+
+
+
+
+
+

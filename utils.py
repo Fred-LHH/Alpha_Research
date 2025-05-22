@@ -342,7 +342,7 @@ def de_cross(y, x_list):
         yresi.index=[timestamp]
         return yresi
         
-    with mpire.WorkerPool(n_jobs=10) as pool:
+    with mpire.WorkerPool(n_jobs=4) as pool:
         residual_df=pd.concat(pool.map(one, dates)).sort_index()
     return residual_df
 

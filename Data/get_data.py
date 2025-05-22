@@ -174,29 +174,9 @@ def read_sw_industry():
     table_name = DB_NAME['sw']
     sql = 'select l1code, ts_code, in_date, out_date from {}'.format(table_name)
     db.cursor.execute(sql)
-    
-
-
-@cachier()
-def get_industry_dummies(start = DATE1,
-                         is_stack = 1):
-
-    sw_ind_path = '/Volumes/T7Shield/Alpha_Research'
-    sw_ind = pd.read_pickle(os.path.join(sw_ind_path, 'sw_dummies.pkl'))
-    sw_ind = sw_ind[sw_ind.date >= start]
-    sw_ind.reset_index(drop=True, inplace=True)
-    if is_stack:
-        return sw_ind
-    else:
-        ind_cols = list(sw_ind.columns)[2:]
-        res = {}
-        for ind in ind_cols:
-            df = sw_ind[["date", "code", ind]]
-            df = df.pivot(index="date", columns="code", values=ind)
-            df = df.fillna(0)
-            df.index = pd.to_datetime(df.index)
-            res[ind] = df
-        return res
+    sw_industry = pd.DataFrame(db.cursor.fetchall())
+    sw_industry.columns = ['sw_ind', 'code', 'in_date', 'out_date']
+    return sw_industry
 
 
 

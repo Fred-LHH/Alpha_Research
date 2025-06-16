@@ -5,7 +5,7 @@ os.chdir('/Users/lihaohan/Alpha_Research')
 from Data.utils import DButils
 from config import *
 from cachier import cachier
-from typing import Union
+from typing import Union, List
 import tushare as ts
 ts.set_token(TOKEN)
 pro = ts.pro_api()
@@ -238,5 +238,41 @@ def read_filter_con(
     return df
     
     
+
+def get_index_data(index: str, 
+                   start_date: str='2020-05-23', 
+                   end_date: str='2025-05-23',
+                   fields: List[str]=None):
+    """获取宽基指数在日期范围内的行情数据
+
+    Args:
+    index: str
+        中证500: '000905'
+        中证1000: '000852'
+        沪深300: '000300'
+    start_date: '2020-05-23'
+    end_date: '2025-05-23'
+    fields: List[str]
+    """
+    try:
+        fields = "*" if not fields else f", ".join(fields)
+        sql = f"""
+            SELECT {fields}
+            FROM index_daily_pv
+            WHERE code = %s
+            AND date >= %s 
+            AND date <= %s
+            ORDER BY date ASC
+            """
+        with db.cursor() as cursor:  
+            cursor.execute(sql, (index, start_date, end_date))
+            cols_name = [desc[0] for desc in cursor.description]
+            data = cursor.fetchall()
+            df = pd.DataFrame(data, columns=cols_name)
+            return df
+    except Exception as e:
+        print(f"Error: {e}")
+        return pd.DataFrame()
+
     
 

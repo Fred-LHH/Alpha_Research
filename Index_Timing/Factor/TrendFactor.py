@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from .Base import BaseTimingFactor
+from Index_Timing.Factor.Base import BaseTimingFactor
 import os
 
 class TrendFactor(BaseTimingFactor):

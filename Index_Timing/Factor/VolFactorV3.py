@@ -46,134 +46,133 @@ class VolumeFactorV3(BaseTimingFactor):
             )
     
     def prepare_data(self):
-      """返回多个指数的日频量价数据文件
-      """
-      daily_files = os.listdir(self.data_path)
-      daily_files = [f for f in daily_files if f.endswith('.pkl') and not f.startswith('._')]
+        """返回多个指数的日频量价数据文件
+        """
+        daily_files = os.listdir(self.data_path)
+        daily_files = [f for f in daily_files if f.endswith('.pkl') and not f.startswith('._')]
 
-      return daily_files
+        return daily_files
     
     def generate_factor(self, start_date, end_date):
-      files = self.prepare_data()
-      fast_sc = 2 / (self.factor_parameters['fast_constant'] + 1)
-      slow_sc = 2 / (self.factor_parameters['slow_constant'] + 1)
-      WMA_period = self.factor_parameters['WMA_period']
+        files = self.prepare_data()
+        fast_sc = 2 / (self.factor_parameters['fast_constant'] + 1)
+        slow_sc = 2 / (self.factor_parameters['slow_constant'] + 1)
+        WMA_period = self.factor_parameters['WMA_period']
 
-      def _cal_OBV(data):
-        """计算OBV的改进版VA
-        """
-        hc_diff = data['high'] - data['close']
-        hc_diff = hc_diff.replace(0, np.nan) 
-        va = data['vol'] * (
-          (data['close'] - data['low']) -
-          (data['high'] - data['close'])
-        ) / hc_diff
-        va_adjust = np.where(
-            data['close'] > data['pre_close'], va,
-            np.where(data['close'] < data['pre_close'], -va, 0)
-        )
-        # 累计OBV
-        return va_adjust.cumsum()
+        def _cal_OBV(data):
+            """计算OBV的改进版VA
+            """
+            hc_diff = data['high'] - data['close']
+            hc_diff = hc_diff.replace(0, np.nan) 
+            va = data['vol'] * (
+              (data['close'] - data['low']) -
+              (data['high'] - data['close'])
+            ) / hc_diff
+            va_adjust = np.where(
+                data['close'] > data['pre_close'], va,
+                np.where(data['close'] < data['pre_close'], -va, 0)
+            )
+            # 累计OBV
+            return va_adjust.cumsum()
       
-      def _cal_pvi(data):
-        """计算正成交量指标
-        """
-        pvi = pd.Series(1000, index=data.index, dtype=float)
-        vol_increase = data['vol'] > data['vol'].shift(1)
-        for i in range(1, len(pvi)):
-            if vol_increase.iloc[i]:
-                pvi.iloc[i] = pvi.iloc[i-1] * (1 + data['pct_change'].iloc[i])
-        return pvi
+        def _cal_pvi(data):
+            """计算正成交量指标
+            """
+            pvi = pd.Series(1000, index=data.index, dtype=float)
+            vol_increase = data['vol'] > data['vol'].shift(1)
+            for i in range(1, len(pvi)):
+                if vol_increase.iloc[i]:
+                    pvi.iloc[i] = pvi.iloc[i-1] * (1 + data['pct_change'].iloc[i])
+            return pvi
       
-      def _cal_nvi(data):
-        """计算负成交量指标
-        """
-        nvi = pd.Series(1000, index=data.index, dtype=float)
-        vol_decrease = data['volume'] < data['volume'].shift(1)
+        def _cal_nvi(data):
+            """计算负成交量指标
+            """
+            nvi = pd.Series(1000, index=data.index, dtype=float)
+            vol_decrease = data['volume'] < data['volume'].shift(1)
     
-        for i in range(1, len(nvi)):
-            if vol_decrease.iloc[i]:
-                nvi.iloc[i] = nvi.iloc[i-1] * (1 + data['pct_change'].iloc[i])
-        return nvi
+            for i in range(1, len(nvi)):
+                if vol_decrease.iloc[i]:
+                    nvi.iloc[i] = nvi.iloc[i-1] * (1 + data['pct_change'].iloc[i])
+            return nvi
       
-      def _calculate_ama(ser, period):
-        """计算适应性移动平均线(AMA)
-        """
-        direction = ser - ser.shift(period)
+        def _calculate_ama(ser, period):
+            """计算适应性移动平均线(AMA)
+            """
+            direction = ser - ser.shift(period)
         
-        # 波动性计算
-        volatility = ser.diff().abs().rolling(period).sum()
-        volatility = volatility.replace(0, np.nan)  # 避免除零错误
+            # 波动性计算
+            volatility = ser.diff().abs().rolling(period).sum()
+            volatility = volatility.replace(0, np.nan)  # 避免除零错误
         
-        # 效率比率
-        er = (direction / volatility).abs()
+            # 效率比率
+            er = (direction / volatility).abs()
         
-        # 平滑系数计算
-        sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
+            # 平滑系数计算
+            sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
         
-        # AMA计算
-        ama = pd.Series(0.0, index=ser.index)
-        ama.iloc[:period] = ser.iloc[:period].mean()  
+            # AMA计算
+            ama = pd.Series(0.0, index=ser.index)
+            ama.iloc[:period] = ser.iloc[:period].mean()  
         
-        # 递归计算AMA
-        for i in range(period, len(ser)):
-            ama.iloc[i] = ama.iloc[i-1] + sc.iloc[i] * (ser.iloc[i] - ama.iloc[i-1])
+            # 递归计算AMA
+            for i in range(period, len(ser)):
+                ama.iloc[i] = ama.iloc[i-1] + sc.iloc[i] * (ser.iloc[i] - ama.iloc[i-1])
         
-        return ama
+            return ama
       
-      def _filter_down_market(price):
-        """过滤掉大跌的市场状态
-        """
-        weights = np.arange(1, WMA_period+1)
-        wma_price = np.comvolve(price, weights / weights.sum(), mode='full')[:len(price)]
-        wma_price = pd.Series(wma_price, index=price.index)
-        wma_price.iloc[:WMA_period-1] = np.nan
-        direction = (wma_price - wma_price.shift(10)).abs()
-        volatility = wma_price.diff().abs().rolling(10).sum()
-        volatility = volatility.replace(0, np.nan)
-        efficiency = (direction / volatility) * 100
-        momentum = wma_price - wma_price.shift(10)
-        strong_downtrend = (efficiency > 50) & (momentum < 0)
-        market_status = pd.Series(1, index=price.index)
-        market_status[strong_downtrend] = 0
-        market_status.iloc[:10] = 1
+        def _filter_down_market(price):
+            """过滤掉大跌的市场状态
+            """
+            weights = np.arange(1, WMA_period+1)
+            wma_price = np.comvolve(price, weights / weights.sum(), mode='full')[:len(price)]
+            wma_price = pd.Series(wma_price, index=price.index)
+            wma_price.iloc[:WMA_period-1] = np.nan
+            direction = (wma_price - wma_price.shift(10)).abs()
+            volatility = wma_price.diff().abs().rolling(10).sum()
+            volatility = volatility.replace(0, np.nan)
+            efficiency = (direction / volatility) * 100
+            momentum = wma_price - wma_price.shift(10)
+            strong_downtrend = (efficiency > 50) & (momentum < 0)
+            market_status = pd.Series(1, index=price.index)
+            market_status[strong_downtrend] = 0
+            market_status.iloc[:10] = 1
     
-        return market_status
+            return market_status
     
-      try:
-        for file in files:
-          df = pd.read_pickle(os.path.join(self.data_path, file))
-          df = self.data.copy()
+        try:
+            for file in files:
+                df = pd.read_pickle(os.path.join(self.data_path, file))
       
-          df['OBV_VA'] = self._calculate_obv()
-          df['PVI'] = self._calculate_pvi()
-          df['NVI'] = self._calculate_nvi()
+                df['OBV_VA'] = self._calculate_obv()
+                df['PVI'] = self._calculate_pvi()
+                df['NVI'] = self._calculate_nvi()
         
-          # 计算AMA（成交量适应性移动平均）
-          df['AMA_vol'] = self._calculate_ama(df['volume'], self.factor_parameters['er_period'])
+                # 计算AMA（成交量适应性移动平均）
+                df['AMA_vol'] = self._calculate_ama(df['volume'], self.factor_parameters['er_period'])
         
-          # 计算BMA（价格移动平均）
-          L = self.factor_parameters['L']
-          df['BMA'] = df['close'].rolling(L).mean()
+                # 计算BMA（价格移动平均）
+                L = self.factor_parameters['L']
+                df['BMA'] = df['close'].rolling(L).mean()
         
-          # 计算量能 (AMA5/AMALong)
-          df['AMA5'] = df['AMA_vol'].rolling(self.factor_parameters['ama_short']).mean()
-          df['AMALong'] = df['AMA_vol'].rolling(self.factor_parameters['ama_long']).mean()
-          df['volume_energy'] = df['AMA5'] / df['AMALong']
+                # 计算量能 (AMA5/AMALong)
+                df['AMA5'] = df['AMA_vol'].rolling(self.factor_parameters['ama_short']).mean()
+                df['AMALong'] = df['AMA_vol'].rolling(self.factor_parameters['ama_long']).mean()
+                df['volume_energy'] = df['AMA5'] / df['AMALong']
         
-          # 计算价能 (BMA_t / BMA_{t-N})
-          N = self.factor_parameters['N']
-          df['price_energy'] = df['BMA'] / df['BMA'].shift(N)
+                # 计算价能 (BMA_t / BMA_{t-N})
+                N = self.factor_parameters['N']
+                df['price_energy'] = df['BMA'] / df['BMA'].shift(N)
         
-          # 计算价量共振因子
-          df['resonance'] = df['price_energy'] * df['volume_energy']
+                # 计算价量共振因子
+                df['resonance'] = df['price_energy'] * df['volume_energy']
         
-          self.factor = df
+                self.factor = df
         
-          self.save()
-      except Exception as e:
-        print(f"Error processing file {file}: {e}")
-        return pd.DataFrame()
+                self.save()
+        except Exception as e:
+            print(f"Error processing file {file}: {e}")
+            return pd.DataFrame()
 
 
 

@@ -219,3 +219,271 @@ class SignalPost():
         self.post = ReturnsPost(returns=sr_compose, benchmark=benchmark)
         self.post.pnl()
 
+
+
+
+
+class Bt:
+    def __init__(self, 
+                 index_data: pd.DataFrame):
+        """
+        Args:
+        index_data: pd.DataFrame
+            指数数据 columns: ['date', 'code', 'open', 'close']
+        """
+        self.index_data = self.process_index(index_data)
+
+    def process_index(self, df):
+        df.reset_index(inplace=True)
+        df.rename(columns={'order_book_id': 'code'}, inplace=True)
+        df['date'] = pd.to_datetime(df['date'])
+    
+    def cal_mkt_effect(self, window: int=20, 
+                       pos_range: float=0.5,
+                       neg_range: float=-0.3,
+                       pos_num: int=50,
+                       neg_num: int=50):
+        """计算市场赚/亏钱效应
+
+        Args:
+        window: int
+            计算窗口大小
+        pos_range: float
+            累计涨幅阈值
+        neg_range: float
+            累计跌幅阈值
+        pos_num: int
+            赚钱效应股票数阈值
+        neg_num: int
+            亏钱效应股票数阈值
+        """
+        rets = self.stock_data.pct_change(window)
+    
+        pos_mask = rets > pos_range
+        neg_mask = rets < neg_range
+        self.actual_pos_num = pos_mask.sum(axis=1)
+        self.actual_neg_num = neg_mask.sum(axis=1)
+
+        self.market_effect = pd.Series(
+            np.where(self.actual_pos_num > pos_num, 1,
+                    np.where(self.actual_neg_num > neg_num, -1, 0)),
+            index=rets.index,
+            name='market_effect'
+        )
+
+    def generate_signals(self):
+        """生成买入卖出信号
+        """
+        con = self.index_data.join(self.market_effect)
+        con['pos_signal'] = (con['close'] > con['ma20']) & (con['market_effect'] == 1)
+        con['neg_signal'] = con['market_effect'] == -1
+        con['signal'] = 0
+
+        for date in con.index:
+            is_pos_signal = con.loc[date, 'pos_signal']
+            is_neg_signal = con.loc[date, 'neg_signal']
+            
+            if is_pos_signal and is_neg_signal:
+                con.loc[date, 'signal'] = -1
+                
+            elif is_neg_signal:
+                con.loc[date, 'signal'] = -1
+            elif is_pos_signal:
+                con.loc[date, 'signal'] = 1
+        
+        self.signal = con
+
+    def backtest(self, initial_cap=1e6, is_plot=True):
+        df = self.signal.copy()
+        df['position'] = 0.0 # 持仓数量
+        df['cash'] = initial_cap # 初始现金
+        df['total'] = initial_cap # 总资产
+        df['entry'] = 0
+        df['exit'] = 0
+        cash = initial_cap
+        position = 0.0
+
+
+        for i, date in enumerate(df.index):
+            row = df.loc[date]
+        
+            prev_signal = df.iloc[i-1]['signal'] if i > 0 else 0
+            if prev_signal == 1 and position == 0:
+                open_price = row['open']
+                if open_price > 0:
+                    shares = int(cash // open_price)
+                    if shares > 0:
+                        cost = shares * open_price
+                        position = shares
+                        cash -= cost
+                        df.at[date, 'entry'] = 1
+            elif prev_signal == -1 and position > 0:
+                open_price = row['open']
+                sale = position * open_price
+                cash += sale
+                position = 0
+                df.at[date, 'exit'] = 1
+        
+        
+            df.at[date, 'position'] = position
+            df.at[date, 'cash'] = cash
+            df.at[date, 'total'] = cash + (position * row['close'])
+
+        if is_plot:
+            neg_num = self.actual_neg_num
+            pos_num = self.actual_pos_num
+            num = pd.concat([neg_num, pos_num], axis=1)
+            num.columns = ['neg_num', 'pos_num']
+            num.dropna(inplace=True)
+
+            fig, ax1 = plt.subplots(figsize=(12, 8))
+            ax1.bar(num.index, num['neg_num'], label='neg_num', color='blue')
+            ax1.bar(num.index, num['pos_num'], label='pos_num', color='green')
+            ax1.set_ylabel('number', fontsize=12)
+    
+            ax1.axhline(y=50, color='gray', linestyle='--', linewidth=1, label='y=50')  
+            ax1.axhline(y=100, color='black', linestyle='--', linewidth=1, label='y=100')  
+            ax1.legend(loc='upper left')
+
+            ax2 = ax1.twinx()
+            ax2.plot(df.index, df['total'] / initial_cap, label='Strategy Net Value', color='red', linestyle='-')
+            ax2.plot(df.index, df['close'] / df['close'].iloc[0], label='Benchmark ', color='grey', linestyle='-')
+            buy_signals = df[df['entry'] == 1]
+            sell_signals = df[df['exit'] == 1]
+            if not buy_signals.empty:
+                ax2.scatter(buy_signals.index, buy_signals['open'] / df['close'].iloc[0], color='magenta', marker='^', s=100, label='Buy Entry', zorder=5)
+    
+            if not sell_signals.empty:
+                ax2.scatter(sell_signals.index, sell_signals['open'] / df['close'].iloc[0], color='cyan', marker='v', s=100, label='Sell Exit', zorder=5)
+                    
+            ax2.set_ylabel('Value / Price', fontsize=12)
+            ax2.legend(loc='upper right')
+            
+            plt.title('ZZ500 Strategy', fontsize=16)
+            plt.xlabel('Date', fontsize=12)
+            plt.grid(alpha=0.3)
+    
+            plt.show()
+    
+        
+        entry_dates = df[df['entry'] == 1].index
+        exit_dates = df[df['exit'] == 1].index
+    
+        holding_returns_list = []
+    
+        if not entry_dates.empty:
+            current_entry_idx = 0
+            while current_entry_idx < len(entry_dates):
+                entry_date = entry_dates[current_entry_idx]
+            
+                exits_after_entry = exit_dates[exit_dates > entry_date]
+            
+                if not exits_after_entry.empty:
+                    exit_date = exits_after_entry[0]
+                
+                    entry_p = df.loc[entry_date, 'open']
+                    exit_p = df.loc[exit_date, 'open']
+                
+                    trade_return = (exit_p - entry_p) / entry_p 
+                    holding_returns_list.append(trade_return)
+                
+                    next_entry_candidates = entry_dates[entry_dates > exit_date]
+                    if not next_entry_candidates.empty:
+                        current_entry_idx = entry_dates.get_loc(next_entry_candidates[0])
+                    else:
+                        break 
+                else:
+                    # 如果有入场但没有对应的出场 (可能持有到最后)
+                    entry_p = df.loc[entry_date, 'open']
+                    exit_p = df['close'].iloc[-1] 
+                    trade_return = (exit_p - entry_p) / entry_p
+                    holding_returns_list.append(trade_return)
+                    break 
+
+        holding_returns = np.array(holding_returns_list)
+
+        if len(holding_returns) > 0:
+            pos_returns = holding_returns[holding_returns > 0]
+            neg_returns = holding_returns[holding_returns < 0]
+            profit_loss_ratio = np.mean(pos_returns) / abs(np.mean(neg_returns)) if len(neg_returns) > 0 else np.nan
+            win_rate = len(pos_returns) / len(holding_returns)
+            mean_holding_return = np.mean(holding_returns)
+        else:
+            profit_loss_ratio = np.nan
+            win_rate = np.nan
+            mean_holding_return = np.nan
+
+ 
+        df['daily_ret'] = df['total'].pct_change().fillna(0)
+        total_return = df['total'].iloc[-1] / initial_cap - 1
+
+        num_years = (df.index[-1] - df.index[0]).days / 365
+        ret_yearly = total_return / num_years
+
+        cumulative = df['total']
+        rolling_max = cumulative.cummax()
+        drawdown = (cumulative - rolling_max) / rolling_max
+        max_drawdown = drawdown.min()
+    
+    
+        sharpe_ratio = (df['daily_ret'].mean() / df['daily_ret'].std()) * np.sqrt(252) if df['daily_ret'].std() != 0 else 0
+
+        perf = pd.Series([total_return, ret_yearly, sharpe_ratio, max_drawdown, win_rate, profit_loss_ratio, mean_holding_return, len(holding_returns)],
+                     index=[' 总收益率', '年化收益率', '夏普比率', '最大回撤', '胜率', '盈亏比', '单笔交易的平均收益', '总交易次数'])
+
+        return df, perf
+
+    def optimize_params(self, p_range: List[int],
+                        n_range: List[int]):
+
+        """
+        通过网格搜索优化赚钱效应和亏钱效应的股票数量阈值。
+
+        Args:
+        p_range: List[int]
+            赚钱效应股票数量阈值的列表，例如 [30, 50, 70]
+        n_range: List[int]
+            亏钱效应股票数量阈值的列表，例如 [30, 50, 70]
+
+        这里采用总收益率比作为优化目标。
+        """
+        from tqdm import tqdm
+        import warnings
+        warnings.filterwarnings("ignore")
+        results = []
+        best_ret = -np.inf
+        best_params = {}
+
+        for pos_num_val in tqdm(p_range):
+            for neg_num_val in n_range:
+                
+                self.cal_mkt_effect(pos_num=pos_num_val, neg_num=neg_num_val)
+                self.generate_signals()
+                _, perf = self.backtest(is_plot=False)  
+
+                current_ret = perf[' 总收益率']
+                if pd.isna(current_ret): 
+                    current_ret = -np.inf
+
+                results.append({
+                    'pos_num': pos_num_val,
+                    'neg_num': neg_num_val,
+                    **perf.to_dict() 
+                })
+
+                if current_ret > best_ret:
+                    best_ret = current_ret
+                    best_params = {'pos_num': pos_num_val, 'neg_num': neg_num_val}
+        
+        results_df = pd.DataFrame(results)
+        print(f"\nBest parameters: {best_params} with 总收益率: {best_ret:.4f}")
+        
+        return results_df, best_params
+
+
+
+
+
+
+
+

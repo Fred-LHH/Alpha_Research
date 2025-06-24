@@ -51,57 +51,63 @@ class TrendFactor(BaseTimingFactor):
             )
     
     def prepare_data(self):
-      """返回多个指数的日频量价数据文件
-      """
-      daily_files = os.listdir(self.data_path)
-      daily_files = [f for f in daily_files if f.endswith('.pkl') and not f.startswith('._')]
+        """返回多个指数的日频量价数据文件
+        """
+        daily_files = os.listdir(self.data_path)
+        daily_files = [f for f in daily_files if f.endswith('.parquet') and not f.startswith('._')]
 
-      return daily_files
+        return daily_files
+
+    def process_ricequant_data(self, df):
+        df = df.copy()
+        df = df.reset_index()
+        df.rename(columns={'order_book_id': 'code', 'volume': 'vol', 'prev_close': 'pre_close'}, inplace=True)
+        return df
     
     def generate_factor(self, start_date, end_date):
-      files = self.prepare_data()
-      WMA_period = self.factor_parameters['WMA_period']
+        files = self.prepare_data()
+        WMA_period = self.factor_parameters['WMA_period']
 
-      def _cal_Trend_ind(data):
-        """计算趋势指标
-        """
-        short_ema = data['close'].ewm(span=self.factor_parameters['EMA_short'], adjust=False).mean()
-        long_ema = data['close'].ewm(span=self.factor_parameters['EMA_long'], adjust=False).mean()
-        TrendInd = short_ema / long_ema
-        AcceleratorInd = TrendInd / TrendInd.ewm(span=self.factor_parameters['compare'], adjust=False).mean()
-        long_signal = (TrendInd > 1) & (AcceleratorInd > 1)
-        return TrendInd, AcceleratorInd, long_signal
+        def _cal_Trend_ind(data):
+            """计算趋势指标
+            """
+            short_ema = data['close'].ewm(span=self.factor_parameters['EMA_short'], adjust=False).mean()
+            long_ema = data['close'].ewm(span=self.factor_parameters['EMA_long'], adjust=False).mean()
+            TrendInd = short_ema / long_ema
+            AcceleratorInd = TrendInd / TrendInd.ewm(span=self.factor_parameters['compare'], adjust=False).mean()
+            long_signal = (TrendInd > 1) & (AcceleratorInd > 1)
+            return TrendInd, AcceleratorInd, long_signal
       
-      def _cal_short_state(price):
-        """计算市场下跌状态 
-        """
-        weights = np.arange(1, WMA_period+1)
-        wma_price = np.comvolve(price, weights / weights.sum(), mode='full')[:len(price)]
-        wma_price = pd.Series(wma_price, index=price.index)
-        wma_price.iloc[:WMA_period-1] = np.nan
-        momentum = wma_price - wma_price.shift(10)
-        c5_mean = price.rolling(5).mean()
-        c90_mean = price.rolling(90).mean()
-        short_state = (c5_mean < c90_mean) & (momentum < 0)
-        return short_state
+        def _cal_short_state(price):
+            """计算市场下跌状态 
+            """
+            weights = np.arange(1, WMA_period+1)
+            wma_price = np.convolve(price, weights / weights.sum(), mode='full')[:len(price)]
+            wma_price = pd.Series(wma_price, index=price.index)
+            wma_price.iloc[:WMA_period-1] = np.nan
+            momentum = wma_price - wma_price.shift(10)
+            c5_mean = price.rolling(5).mean()
+            c90_mean = price.rolling(90).mean()
+            short_state = (c5_mean < c90_mean) & (momentum < 0)
+            return short_state
 
 
-      try:
-        for file in files:
-          df = pd.read_pickle(os.path.join(self.data_path, file))
-          df = self.data.copy()
+        try:
+            for file in files:
+              df = pd.read_parquet(os.path.join(self.data_path, file))
+              df = self.process_ricequant_data(df)
 
-          TrendInd, AcceleratorInd, long_signal = _cal_Trend_ind(df)
-          short_state = _cal_short_state(df['close'])
-          long_signal = long_signal & ~short_state
+              TrendInd, AcceleratorInd, long_signal = _cal_Trend_ind(df)
+              short_state = _cal_short_state(df['close'])
+              long_signal = long_signal & ~short_state
           
-          df['TrendInd'], df['AcceleratorInd'], df['long'], df['short'] = TrendInd, AcceleratorInd, long_signal, short_state
-          self.factor = df
+              df['TrendInd'], df['AcceleratorInd'], df['long'], df['short'] = TrendInd, AcceleratorInd, long_signal, short_state
+              self.factor = df
         
-          self.save()
-      except Exception as e:
-        print(f"Error processing file {file}: {e}")
-        return pd.DataFrame()
+              self.save()
+        except Exception as e:
+          print(f"Error processing file {file}: {e}")
+          return pd.DataFrame()
 
 
 

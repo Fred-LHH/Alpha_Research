@@ -158,7 +158,7 @@ class Backtest_Factor:
     def compose_mean_reg(self, df):
         """假设指标会经历均值回归, 以该指标超出其近5年均值的百分比作为仓位比例
         """
-        df['rolling_5y_mean'] = df[self.fname].rolling(window=252*5).mean()
+        df['rolling_5y_mean'] = df[self.fname].rolling(window=252*1).mean()
         df['signal'] = (df[self.fname] - df['rolling_5y_mean']) / df['rolling_5y_mean']
         signal = df['signal']
         pos = pd.Series(np.where(signal >= 0, 1, np.where(signal <= -1, 0, 1+signal)), 
@@ -172,8 +172,8 @@ class Backtest_Factor:
            r = F / R - 1
            R = max_5y - min_5y
         """
-        df['rolling_5y_max'] = df[self.fname].rolling(window=252*5).max()
-        df['rolling_5y_min'] = df[self.fname].rolling(window=252*5).min()
+        df['rolling_5y_max'] = df[self.fname].rolling(window=252*1).max()
+        df['rolling_5y_min'] = df[self.fname].rolling(window=252*1).min()
         df['R'] = df['rolling_5y_max'] - df['rolling_5y_min']
         df['signal'] = df[self.fname] / df['R'] - 1
 

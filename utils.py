@@ -435,6 +435,91 @@ def show_corr(
             corr.plot(rot=60)
             plt.show()
         return corr.mean()
+    
+def show_ts_corr(fac1: pd.DataFrame,
+    fac2: pd.DataFrame,
+    method: str = "pearson",
+    plt_plot: bool = 1,
+    show_series: bool = 0,
+    ) -> float:
+    """展示两个因子的时序相关性
+
+    Parameters
+    ----------
+    fac1 : pd.DataFrame
+        因子1
+    fac2 : pd.DataFrame
+        因子2
+    method : str, optional
+        计算相关系数的方法, by default "pearson"
+    plt_plot : bool, optional
+        是否画出相关系数的时序变化图, by default 1
+    show_series : bool, optional
+        返回相关性的序列，而非均值
+
+    Returns
+    -------
+    `float`
+        平均时序相关系数
+    """
+    corr = fac1.corrwith(fac2, axis=0, method=method)
+    if show_series:
+        return corr
+    else:
+        if plt_plot:
+            corr.plot(rot=60)
+            plt.show()
+        return corr.mean()
+    
+
+def show_ts_corrs(
+    factors: list[pd.DataFrame],
+    factor_names: list[str] = None,
+    print_bool: bool = True,
+    show_percent: bool = True,
+    method: str = "pearson",
+) -> pd.DataFrame:
+    """展示很多因子两两之间的时序相关性
+
+    Parameters
+    ----------
+    factors : list[pd.DataFrame]
+        所有因子构成的列表, by default None
+    factor_names : list[str], optional
+        上述因子依次的名字, by default None
+    print_bool : bool, optional
+        是否打印出两两之间相关系数的表格, by default True
+    show_percent : bool, optional
+        是否以百分数的形式展示, by default True
+    method : str, optional
+        计算相关系数的方法, by default "pearson"
+
+    Returns
+    -------
+    `pd.DataFrame`
+        两两之间相关系数的表格
+    """
+    corrs = []
+    for i in range(len(factors)):
+        main_i = factors[i]
+        follows = factors[i + 1 :]
+        corr = [show_ts_corr(main_i, i, plt_plot=False, method=method) for i in follows]
+        corr = [np.nan] * (i + 1) + corr
+        corrs.append(corr)
+    if factor_names is None:
+        factor_names = [f"fac{i}" for i in list(range(1, len(factors) + 1))]
+    corrs = pd.DataFrame(corrs, columns=factor_names, index=factor_names)
+    np.fill_diagonal(corrs.to_numpy(), 1)
+    corrs=pd.DataFrame(corrs.fillna(0).to_numpy()+corrs.fillna(0).to_numpy().T-np.diag(np.diag(corrs)),index=corrs.index,columns=corrs.columns)
+    if show_percent:
+        pcorrs = corrs.applymap(to_percent)
+    else:
+        pcorrs = corrs.copy()
+    if print_bool:
+        return pcorrs
+    else:
+        return corrs
+
 
 
 def show_corrs(
